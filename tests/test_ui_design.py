@@ -226,7 +226,7 @@ class DesignUITests(unittest.TestCase):
         QTest.keyClick(self.window.font_size, Qt.Key.Key_End)
         self.assertEqual(self.window.font_size.currentData(), 16)
         self.assertIn("未保存", self.window.settings_hint.text())
-        self.assertEqual(self.window.list_widget.font().pixelSize(), 10)
+        self.assertEqual(self.window.list_widget.font().pixelSize(), 13)
         QTest.mouseClick(self.window.save_button, Qt.MouseButton.LeftButton)
         self.app.processEvents()
         self.assertEqual(self.config.value["font_size"], 16)
@@ -269,7 +269,7 @@ class DesignUITests(unittest.TestCase):
                     old_scroll = scroll.verticalScrollBar().value()
                     QTest.wheelEvent(self.window.windowHandle(), position, QPoint(0, delta))
                     self.app.processEvents()
-                    self.assertEqual(box.currentData(), 10)
+                    self.assertEqual(box.currentData(), 13)
                     self.assertNotIn("未保存", self.window.settings_hint.text())
                     self.assertEqual(self.config.path.read_bytes(), before)
                     if delta < 0:
@@ -304,8 +304,8 @@ class DesignUITests(unittest.TestCase):
             self.window.apply_settings()
         self.window.error.assert_called_once()
         self.assertEqual(self.config.path.read_bytes(), before)
-        self.assertEqual(self.window.font_size.currentData(), 10)
-        self.assertEqual(self.window.list_widget.font().pixelSize(), 10)
+        self.assertEqual(self.window.font_size.currentData(), 13)
+        self.assertEqual(self.window.list_widget.font().pixelSize(), 13)
 
     def test_largest_font_keeps_controls_readable_at_minimum_window_size(self):
         self.window.resize(840, 638)

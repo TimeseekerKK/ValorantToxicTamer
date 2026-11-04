@@ -15,7 +15,7 @@ DEFAULT_CONFIG = {
     "cooldown": 0.5,
     "start_hidden": True,
     "autostart": False,
-    "font_size": 10,
+    "font_size": 13,
 }
 HOTKEYS = tuple(f"F{i}" for i in range(1, 12))  # F12 is reserved by Windows.
 FONT_SIZES = tuple(range(9, 17))
