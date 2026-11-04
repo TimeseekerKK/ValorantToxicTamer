@@ -256,6 +256,7 @@ class MainWindow(QMainWindow):
         buttons = QHBoxLayout()
         self.edit_button = self.button("编辑", self.edit_message)
         self.delete_button = self.button("删除", self.delete_message)
+        self.clear_button = self.button("清空列表", self.clear_messages)
         self.up_button = self.button("", lambda: self.move(-1), icon=QStyle.StandardPixmap.SP_ArrowUp)
         self.down_button = self.button("", lambda: self.move(1), icon=QStyle.StandardPixmap.SP_ArrowDown)
         for button, name in ((self.up_button, "上移"), (self.down_button, "下移")):
@@ -264,8 +265,8 @@ class MainWindow(QMainWindow):
             button.setToolTip(name)
         self.export_button = self.button("导出 TXT", self.export_txt)
         self.edit_buttons = [self.add_button, self.import_button, self.edit_button,
-                             self.delete_button, self.up_button, self.down_button, self.export_button]
-        for button in (self.edit_button, self.delete_button, self.up_button, self.down_button):
+                             self.delete_button, self.clear_button, self.up_button, self.down_button, self.export_button]
+        for button in (self.edit_button, self.delete_button, self.clear_button, self.up_button, self.down_button):
             buttons.addWidget(button)
         buttons.addStretch()
         buttons.addWidget(self.export_button)
@@ -443,6 +444,7 @@ class MainWindow(QMainWindow):
         self.import_button.setEnabled(idle)
         self.edit_button.setEnabled(idle and row >= 0)
         self.delete_button.setEnabled(idle and row >= 0)
+        self.clear_button.setEnabled(idle and count > 0)
         self.up_button.setEnabled(idle and row > 0)
         self.down_button.setEnabled(idle and 0 <= row < count - 1)
         self.export_button.setEnabled(idle and count > 0)
@@ -535,6 +537,25 @@ class MainWindow(QMainWindow):
             values = self.messages.messages.copy()
             values.pop(row)
             self.change(lambda: self.messages.replace(values), row)
+
+    def clear_messages(self):
+        count = len(self.messages.messages)
+        if not count:
+            return
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("清空消息列表")
+        dialog.setText(f"确定删除列表中的全部 {count} 条消息？")
+        dialog.setInformativeText("清空后会自动保存，无法撤销。如需保留，请先取消并导出 TXT 备份。")
+        dialog.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        dialog.button(QMessageBox.StandardButton.Yes).setText("清空列表")
+        dialog.button(QMessageBox.StandardButton.No).setText("取消")
+        dialog.setDefaultButton(QMessageBox.StandardButton.No)
+        dialog.setEscapeButton(QMessageBox.StandardButton.No)
+        style_message_box(dialog, QMessageBox.StandardButton.Yes)
+        answer = dialog.exec()
+        dialog.deleteLater()
+        if answer == QMessageBox.StandardButton.Yes:
+            self.change(lambda: self.messages.replace([]))
 
     def move(self, direction):
         row = self.list_widget.currentRow()

@@ -70,7 +70,92 @@ class DesignUITests(unittest.TestCase):
         self.assertTrue(self.window.add_button.isEnabled())
         self.assertTrue(self.window.import_button.isEnabled())
         self.assertFalse(self.window.edit_button.isEnabled())
+        self.assertFalse(self.window.clear_button.isEnabled())
         self.assertFalse(self.window.export_button.isEnabled())
+
+    def test_clear_list_confirms_count_and_persists_empty_state(self):
+        self.messages.advance()
+        self.window.list_widget.setCurrentRow(-1)
+        self.assertTrue(self.window.clear_button.isEnabled())
+        observed = {}
+
+        def confirm():
+            dialog = self.app.activeModalWidget()
+            observed["text"] = dialog.text()
+            observed["default"] = dialog.standardButton(dialog.defaultButton())
+            dialog.button(QMessageBox.StandardButton.Yes).click()
+
+        QTimer.singleShot(0, confirm)
+        QTest.mouseClick(self.window.clear_button, Qt.MouseButton.LeftButton)
+        self.assertIn("全部 3 条消息", observed["text"])
+        self.assertEqual(observed["default"], QMessageBox.StandardButton.No)
+        self.assertEqual(self.messages.messages, [])
+        self.assertEqual(MessageManager(self.messages.path).messages, [])
+        self.assertEqual(self.messages.index, 0)
+        self.assertEqual(self.window.list_widget.count(), 0)
+        self.assertEqual(self.window.message_stack.currentIndex(), 1)
+        self.assertEqual(self.window.count_label.text(), "0 条")
+        self.assertEqual(self.window.next_label.text(), "暂无消息")
+        self.assertIn("0 / 0", self.window.state_label.text())
+        self.assertFalse(self.window.clear_button.isEnabled())
+        self.assertFalse(self.window.delete_button.isEnabled())
+        self.assertFalse(self.window.export_button.isEnabled())
+
+    def test_clear_list_cancel_enter_escape_and_close_preserve_messages(self):
+        self.messages.advance()
+        before = self.messages.path.read_bytes()
+        for action in ("cancel", "enter", "escape", "close"):
+            with self.subTest(action=action):
+                def cancel():
+                    dialog = self.app.activeModalWidget()
+                    if action == "cancel":
+                        dialog.button(QMessageBox.StandardButton.No).click()
+                    elif action == "close":
+                        dialog.close()
+                    else:
+                        QTest.keyClick(dialog, Qt.Key.Key_Return if action == "enter" else Qt.Key.Key_Escape)
+                QTimer.singleShot(0, cancel)
+                self.window.clear_messages()
+                self.assertEqual(self.messages.path.read_bytes(), before)
+                self.assertEqual(self.messages.messages, ["第一条", "第二条", "第三条"])
+                self.assertEqual(self.messages.index, 1)
+                self.assertEqual(self.window.list_widget.count(), 3)
+
+    def test_clear_list_save_failure_keeps_messages_and_progress(self):
+        self.messages.advance()
+        before = self.messages.path.read_bytes()
+        QTimer.singleShot(0, lambda: self.app.activeModalWidget().button(QMessageBox.StandardButton.Yes).click())
+        with patch("valorant_toxic_tamer.config_manager.os.replace", side_effect=OSError("disk full")):
+            self.window.clear_messages()
+        self.window.error.assert_called_once()
+        self.assertEqual(self.messages.path.read_bytes(), before)
+        self.assertEqual(self.messages.messages, ["第一条", "第二条", "第三条"])
+        self.assertEqual(self.messages.index, 1)
+        self.assertEqual(self.window.list_widget.count(), 3)
+
+    def test_clear_list_rechecks_sending_state_after_confirmation(self):
+        before = self.messages.path.read_bytes()
+
+        def confirm_while_busy():
+            self.sender.busy = True
+            self.app.activeModalWidget().button(QMessageBox.StandardButton.Yes).click()
+
+        QTimer.singleShot(0, confirm_while_busy)
+        try:
+            self.window.clear_messages()
+        finally:
+            self.sender.busy = False
+        self.window.error.assert_called_once()
+        self.assertEqual(self.messages.path.read_bytes(), before)
+        self.assertEqual(self.messages.messages, ["第一条", "第二条", "第三条"])
+
+    def test_clear_empty_list_does_not_open_confirmation_or_save(self):
+        self.messages.replace([])
+        self.window.reload_messages()
+        with patch("valorant_toxic_tamer.ui.QMessageBox") as dialog, patch.object(self.messages, "replace") as replace:
+            self.window.clear_messages()
+        dialog.assert_not_called()
+        replace.assert_not_called()
 
     def test_dropdown_popup_retains_keyboard_selection(self):
         self.window.tabs.setCurrentIndex(1)
