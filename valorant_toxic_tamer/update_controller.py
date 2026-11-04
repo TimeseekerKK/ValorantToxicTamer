@@ -4,7 +4,10 @@ import threading
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 from PySide6.QtWidgets import QMessageBox
 
-from .updater import download_release, installed_executable, latest_release, launch_installer
+from .app_version import VERSION
+from .config_manager import atomic_json, load_json
+from .updater import (UPDATE_CHANNELS, download_release, installed_executable,
+                      latest_release, launch_installer, version_tuple)
 from .ui_theme import style_message_box
 
 
@@ -34,6 +37,35 @@ class UpdateController(QObject):
         self.closing = False
         self.stage = None
         self.target = None
+        # Older official versions ignore this file, so switching back remains compatible.
+        self.preferences_path = window.config.path.with_name("update_settings.json")
+        def validate(value):
+            if not isinstance(value, dict) or set(value) != {"channel"} or value["channel"] not in UPDATE_CHANNELS:
+                raise ValueError("更新渠道设置无效。")
+        self.channel = load_json(self.preferences_path, {"channel": "stable"}, validate)["channel"]
+        window.update_channel.setCurrentIndex(window.update_channel.findData(self.channel))
+        window.update_channel.currentIndexChanged.connect(self.change_channel)
+        self._channel_hint()
+
+    def _channel_hint(self):
+        self.window.update_channel_hint.setText(
+            "仅接收正式版；从 Beta 切回时会提示降级。" if self.channel == "stable" else
+            "接收正式版和 Beta，选择版本号最高的版本。测试功能可能尚不稳定。")
+        self.window.update_channel.setToolTip("选择后自动保存，下次启动保留。")
+
+    @Slot()
+    def change_channel(self):
+        channel = self.window.update_channel.currentData()
+        try:
+            atomic_json(self.preferences_path, {"channel": channel})
+        except OSError as exc:
+            self.window.update_channel.blockSignals(True)
+            self.window.update_channel.setCurrentIndex(self.window.update_channel.findData(self.channel))
+            self.window.update_channel.blockSignals(False)
+            self.window.error(exc)
+            return
+        self.channel = channel
+        self._channel_hint()
 
     @Slot()
     def check(self):
@@ -41,9 +73,12 @@ class UpdateController(QObject):
             return
         self.busy = True
         self.window.update_button.setEnabled(False)
+        self.window.update_button.set_busy(True)
+        self.window.update_channel.setEnabled(False)
         self.window.update_button.setText("检查中…")
         self.window.result_label.setText("正在检查更新…")
-        self._start("check", latest_release)
+        channel = self.channel
+        self._start("check", lambda: latest_release(channel=channel))
 
     def _start(self, stage, action):
         self.stage = stage
@@ -54,6 +89,8 @@ class UpdateController(QObject):
     def _idle(self):
         self.busy = False
         self.window.update_button.setEnabled(True)
+        self.window.update_button.set_busy(False)
+        self.window.update_channel.setEnabled(True)
         self.window.update_button.setText("检查更新")
 
     @Slot()
@@ -74,13 +111,20 @@ class UpdateController(QObject):
             if release is None:
                 self._idle()
                 self.window.result_label.setText("当前已是最新版本。")
-                self.window.information("检查更新", "当前已是最新版本。")
+                self.window.information("检查更新", f"{UPDATE_CHANNELS[self.channel]}：当前已是最新版本。")
                 return
             dialog = QMessageBox(self.window)
             dialog.setWindowTitle("检查更新")
             dialog.setIcon(QMessageBox.Icon.Question)
             dialog.setText("发现新版本,是否更新")
-            dialog.setInformativeText(f"最新版本：{release.version}\n确认后将下载更新，退出当前程序并覆盖 EXE，然后重新启动。")
+            downgrade = version_tuple(release.version) < version_tuple(VERSION)
+            if downgrade:
+                dialog.setIcon(QMessageBox.Icon.Warning)
+                dialog.setText("切回正式版（降级）？")
+            detail = "\n目标正式版低于当前 Beta，此操作将降级程序。" if downgrade else ""
+            dialog.setInformativeText(
+                f"更新渠道：{UPDATE_CHANNELS[self.channel]}\n当前版本：v{VERSION}\n目标版本：{release.version}"
+                f"{detail}\n确认后将下载更新，退出当前程序并覆盖 EXE，然后重新启动。")
             dialog.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             dialog.button(QMessageBox.StandardButton.Yes).setText("是")
             dialog.button(QMessageBox.StandardButton.No).setText("否")
@@ -118,6 +162,7 @@ class UpdateController(QObject):
 
     def shutdown(self):
         self.closing = True
+        self.window.update_button.set_busy(False)
         self.cancel.set()
         if self.worker:
             self.worker.wait()

@@ -23,6 +23,8 @@ from .app_version import VERSION
 
 REPOSITORY = "TimeseekerKK/ValorantToxicTamer"
 LATEST_URL = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
+RELEASES_URL = f"https://api.github.com/repos/{REPOSITORY}/releases"
+UPDATE_CHANNELS = {"stable": "正式版 Release", "beta": "测试版 Beta"}
 EXE_NAME = "ValorantToxicTamer.exe"
 
 
@@ -59,25 +61,58 @@ class Release:
     digest: str | None
 
 
-def latest_release(current=VERSION):
-    request = Request(LATEST_URL, headers={
+def _release_json(url):
+    request = Request(url, headers={
         "Accept": "application/vnd.github+json", "User-Agent": f"ValorantToxicTamer/{VERSION}",
     })
     try:
         with _open_update_url(request) as response:
-            payload = json.load(response)
+            return json.load(response)
     except HTTPError as exc:
         if exc.code == 404:
-            raise ValueError("仓库尚无可用的正式 Release。") from exc
+            raise ValueError("仓库尚无可用的 Release。") from exc
         if exc.code in (403, 429):
             raise ValueError("GitHub 请求受限，请稍后重试。") from exc
         raise
+
+
+def latest_release(current=VERSION, *, channel="stable"):
+    if channel not in UPDATE_CHANNELS:
+        raise ValueError("无法识别更新渠道。")
+    current_version = version_tuple(current)
+    if channel == "beta":
+        candidates = []
+        page = 1
+        while True:
+            releases = _release_json(f"{RELEASES_URL}?per_page=100&page={page}")
+            if not isinstance(releases, list):
+                raise ValueError("GitHub 返回了无效的版本信息。")
+            for release in releases:
+                if not isinstance(release, dict) or release.get("draft"):
+                    continue
+                try:
+                    version = version_tuple(release.get("tag_name", ""))
+                except (ValueError, TypeError):
+                    continue
+                if bool(release.get("prerelease")) == (version[3] == 0):
+                    candidates.append((version, release))
+            if len(releases) < 100:
+                break
+            page += 1
+        if not candidates:
+            raise ValueError("仓库尚无可用的正式版或 Beta Release。")
+        payload = max(candidates, key=lambda item: item[0])[1]
+    else:
+        payload = _release_json(LATEST_URL)
     if not isinstance(payload, dict):
         raise ValueError("GitHub 返回了无效的版本信息。")
     tag = payload.get("tag_name", "")
-    if payload.get("draft") or payload.get("prerelease"):
+    if payload.get("draft") or (channel == "stable" and payload.get("prerelease")):
         raise ValueError("最新版本不是正式 Release。")
-    if version_tuple(tag) <= version_tuple(current):
+    target_version = version_tuple(tag)
+    # Only an explicit switch from a Beta to the stable channel permits rollback.
+    rollback_to_stable = channel == "stable" and current_version[3] == 0
+    if target_version == current_version or (target_version < current_version and not rollback_to_stable):
         return None
     assets = [asset for asset in payload.get("assets", [])
               if asset.get("state") == "uploaded" and asset.get("name", "").lower().endswith(".exe")]

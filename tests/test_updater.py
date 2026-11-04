@@ -11,7 +11,7 @@ from urllib.error import HTTPError, URLError
 
 import truststore
 
-from valorant_toxic_tamer.updater import (EXE_NAME, LATEST_URL, REPOSITORY, Release, download_release,
+from valorant_toxic_tamer.updater import (EXE_NAME, LATEST_URL, RELEASES_URL, REPOSITORY, Release, download_release,
                      installed_executable, latest_release, launch_installer, version_tuple)
 
 
@@ -55,9 +55,53 @@ class UpdaterTests(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 version_tuple(invalid)
 
-    def test_beta_current_can_upgrade_to_same_base_stable_but_never_downgrades(self):
+    def test_beta_can_switch_back_to_latest_stable_but_stable_never_downgrades(self):
         self.assertEqual(self.lookup("1.1.0-beta.2"), self.release)
-        self.assertIsNone(self.lookup("1.2.0-beta.1"))
+        self.assertEqual(self.lookup("1.2.0-beta.1"), self.release)
+        self.assertIsNone(self.lookup("1.2.0"))
+
+    def beta_lookup(self, releases, current="1.0.0"):
+        response = io.BytesIO(json.dumps(releases).encode())
+        with patch("valorant_toxic_tamer.updater.urlopen", return_value=response) as request:
+            result = latest_release(current, channel="beta")
+        self.assertEqual(request.call_args.args[0].full_url, f"{RELEASES_URL}?per_page=100&page=1")
+        self.assert_verified_context(request)
+        return result
+
+    def test_beta_channel_compares_numeric_versions_and_excludes_drafts_and_other_previews(self):
+        releases = [dict(self.payload, tag_name="v1.2.0-beta.2", prerelease=True),
+                    dict(self.payload, tag_name="v1.2.0-beta.10", prerelease=True),
+                    dict(self.payload, tag_name="v9.0.0-beta.1", prerelease=True, draft=True),
+                    dict(self.payload, tag_name="v9.0.0-rc.1", prerelease=True),
+                    dict(self.payload, tag_name="invalid"), dict(self.payload, tag_name=None),
+                    dict(self.payload, tag_name="v8.0.0", prerelease=True),
+                    dict(self.payload, tag_name="v8.0.0-beta.1", prerelease=False), self.payload]
+        self.assertEqual(self.beta_lookup(releases).version, "v1.2.0-beta.10")
+        self.assertIsNone(self.beta_lookup(releases, current="1.2.0"))
+
+    def test_beta_channel_prefers_same_base_stable_and_falls_back_to_stable(self):
+        releases = [dict(self.payload, tag_name="v1.1.0-beta.10", prerelease=True), self.payload]
+        self.assertEqual(self.beta_lookup(releases), self.release)
+        self.assertEqual(self.beta_lookup([self.payload]), self.release)
+        self.assertIsNone(self.beta_lookup([self.payload], current="1.1.0"))
+
+    def test_beta_channel_reads_all_pages_before_selecting_newest_version(self):
+        pages = [io.BytesIO(json.dumps([self.payload] * 100).encode()),
+                 io.BytesIO(json.dumps([dict(self.payload, tag_name="v1.3.0-beta.1", prerelease=True)]).encode())]
+        with patch("valorant_toxic_tamer.updater.urlopen", side_effect=pages) as request:
+            result = latest_release("1.0.0", channel="beta")
+        self.assertEqual(result.version, "v1.3.0-beta.1")
+        self.assertEqual([call.args[0].full_url for call in request.call_args_list],
+                         [f"{RELEASES_URL}?per_page=100&page={page}" for page in (1, 2)])
+
+    def test_invalid_channel_empty_beta_and_malformed_response_are_reported(self):
+        with patch("valorant_toxic_tamer.updater.urlopen") as network:
+            with self.assertRaisesRegex(ValueError, "渠道"):
+                latest_release(channel="unknown")
+            network.assert_not_called()
+        for payload in ([], [dict(self.payload, draft=True)], {}):
+            with self.subTest(payload=payload), self.assertRaises(ValueError):
+                self.beta_lookup(payload)
 
     def test_newer_release_selects_expected_exe(self):
         self.payload["assets"] += [dict(self.asset, name="uninstaller.exe"),

@@ -334,6 +334,23 @@ class DesignUITests(unittest.TestCase):
         self.assertEqual(menu.font().pointSize(), 16)
         menu.deleteLater()
 
+    def test_update_channel_and_button_remain_reachable_at_largest_font(self):
+        self.window.resize(860, 680)
+        self.window.tabs.setCurrentIndex(1)
+        self.window.font_size.setCurrentIndex(self.window.font_size.findData(16))
+        self.window.apply_settings()
+        self.window.update_channel.setCurrentIndex(self.window.update_channel.findData("beta"))
+        self.app.processEvents()
+        scroll = self.window.tabs.widget(1).findChild(QScrollArea)
+        for control in (self.window.update_channel, self.window.update_button):
+            scroll.ensureWidgetVisible(control)
+            self.app.processEvents()
+            top_left = control.mapTo(scroll.viewport(), control.rect().topLeft())
+            bottom_right = control.mapTo(scroll.viewport(), control.rect().bottomRight())
+            self.assertTrue(scroll.viewport().rect().contains(top_left))
+            self.assertTrue(scroll.viewport().rect().contains(bottom_right))
+        self.assertGreaterEqual(self.window.update_button.width(), self.window.update_button.sizeHint().width())
+
     def test_long_preview_can_scroll_to_end_and_resets_for_next_message(self):
         text = "长消息：" + "注意配合，等待队友一起行动。" * 30 + "末尾检查"
         self.messages.replace([text, "下一条短消息"])
