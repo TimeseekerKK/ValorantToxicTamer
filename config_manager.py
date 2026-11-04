@@ -63,8 +63,8 @@ def validate_config(value):
     if value["team_hotkey"] == value["all_hotkey"]:
         raise ValueError("两个频道不能使用同一个快捷键")
     seconds = value["cooldown"]
-    if type(seconds) not in (int, float) or not math.isfinite(seconds) or not 0.5 <= seconds <= 10:
-        raise ValueError("冷却时间须在 0.5–10 秒之间")
+    if type(seconds) not in (int, float) or not math.isfinite(seconds) or not 0.2 <= seconds <= 2:
+        raise ValueError("冷却时间须在 0.2–2 秒之间")
     if any(type(value[k]) is not bool for k in ("start_hidden", "autostart")):
         raise ValueError("启动设置必须为布尔值")
 

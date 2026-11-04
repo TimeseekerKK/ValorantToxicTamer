@@ -22,6 +22,8 @@ def run(app, report_path):
         result["hotkeys"] = controller.hotkeys.status.copy()
         result["hotkeys_registered"] = len(controller.hotkeys.registered) == 2
         result["starts_hidden"] = not controller.window.isVisible()
+        result["update_button_available"] = controller.window.update_button.isEnabled()
+        result["update_helper_bundled"] = Path(__file__).with_name("update_install.ps1").exists()
 
         def show_settings():
             controller.tray.menu.actions()[2].trigger()

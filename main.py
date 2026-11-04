@@ -12,6 +12,7 @@ from sender import Sender
 from tray import Tray
 from ui import MainWindow
 from win32_api import WindowsAPI
+from app_version import VERSION
 
 
 class Notifications(QObject):
@@ -30,6 +31,7 @@ class Application(QObject):
         self.sender = Sender(self.messages, self.api, self.config.value["cooldown"],
                              self.notifications.message.emit)
         self.window = MainWindow(self.messages, self.config, self.sender, self.save_settings)
+        self.window.updater.ready_to_install.connect(self.quit)
         self.hotkeys = Hotkeys(app, int(self.window.winId()), self.api, self.sender.trigger)
         self.tray = Tray(self.window, self.quit)
         self.notifications.message.connect(self.report)
@@ -75,6 +77,7 @@ class Application(QObject):
     def cleanup(self):
         self.hotkeys.close()
         self.sender.stop()
+        self.window.updater.shutdown()
         self.tray.hide()
         logger = logging.getLogger("ValorantToxicTamer")
         logger.info("application stopped")
@@ -88,6 +91,7 @@ class Application(QObject):
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("ValorantToxicTamer")
+    app.setApplicationVersion(VERSION)
     app.setQuitOnLastWindowClosed(False)
     if len(sys.argv) == 3 and sys.argv[1] == "--startup-check":
         from startup_check import run

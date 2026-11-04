@@ -12,7 +12,7 @@ try {
         (Join-Path $env:SystemRoot 'System32'),
         $env:SystemRoot
     ) -join ';'
-    & $pythonPath -m PyInstaller --clean --onefile --windowed --name ValorantToxicTamer main.py
+    & $pythonPath -m PyInstaller --clean --onefile --windowed --add-data 'update_install.ps1;.' --name ValorantToxicTamer main.py
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller 打包失败。' }
     & $pythonPath tests/check_package.py dist/ValorantToxicTamer.exe
     if ($LASTEXITCODE -ne 0) { throw '打包依赖检查失败，不能分发此 EXE。' }

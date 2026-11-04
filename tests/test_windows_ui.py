@@ -9,8 +9,9 @@ from unittest.mock import Mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QByteArray
+from PySide6.QtCore import QByteArray, Qt
 from PySide6.QtGui import QFontDatabase
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from config_manager import ConfigManager, DEFAULT_CONFIG
@@ -216,6 +217,90 @@ class WindowsTests(unittest.TestCase):
                 Application.save_settings(controller, {**DEFAULT_CONFIG, "autostart": True})
             registry.assert_not_called()
         controller.config.save.assert_not_called()
+
+    def test_cooldown_keyboard_edit_save_reload_and_shared_boundary(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as directory:
+            directory = Path(directory)
+            config = ConfigManager(directory / "config.json")
+            messages = MessageManager(directory / "messages.json")
+            messages.replace(["测试消息"])
+            api = Mock()
+            api.target.return_value = (100, 200)
+            api.modifiers_down.return_value = False
+            now = [10.0]
+            sender = Sender(messages, api, clock=lambda: now[0], wait=lambda _: None)
+            controller = Mock(config=config, sender=sender)
+            controller.hotkeys.configure.return_value = True
+            controller.hotkeys.status = {"team": "F8", "all": "F9"}
+            window = MainWindow(messages, config, sender,
+                                lambda value: Application.save_settings(controller, value))
+            controller.window = window
+            try:
+                window.show()
+                window.tabs.setCurrentIndex(1)
+                self.app.processEvents()
+                for seconds in (0.2, 0.49, 0.8, 2.0, 0.5):
+                    with self.subTest(seconds=seconds):
+                        window.cooldown.setFocus()
+                        window.cooldown.selectAll()
+                        QTest.keyClicks(window.cooldown, str(seconds))
+                        QTest.mouseClick(window.save_button, Qt.MouseButton.LeftButton)
+                        self.assertEqual(config.value["cooldown"], seconds)
+                        self.assertEqual(ConfigManager(config.path).value["cooldown"], seconds)
+                        self.assertEqual(sender.cooldown, seconds)
+                        self.assertEqual(window.result_label.text(), "设置已保存。")
+                        window.load_settings()
+                        self.assertEqual(float(window.cooldown.text()), seconds)
+                        now[0] = max(now[0], sender.ready_at)
+                        self.assertTrue(sender.trigger("team"))
+                        sender.thread.join(2)
+                        self.assertFalse(sender.thread.is_alive())
+                        self.assertAlmostEqual(sender.ready_at, now[0] + seconds)
+                        now[0] = sender.ready_at - 0.001
+                        self.assertFalse(sender.trigger("all"))
+                        now[0] = sender.ready_at
+                        self.assertTrue(sender.trigger("all"))
+                        sender.thread.join(2)
+                        self.assertFalse(sender.thread.is_alive())
+            finally:
+                sender.stop()
+                window.timer.stop()
+                window.hide()
+                window.deleteLater()
+                self.app.processEvents()
+
+    def test_invalid_cooldown_is_reported_instead_of_silently_changed(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as directory:
+            directory = Path(directory)
+            config = ConfigManager(directory / "config.json")
+            messages = MessageManager(directory / "messages.json")
+            sender = Sender(messages, Mock())
+            controller = Mock(config=config, sender=sender)
+            window = MainWindow(messages, config, sender,
+                                lambda value: Application.save_settings(controller, value))
+            window.error = Mock()
+            before = config.path.read_bytes()
+            try:
+                window.show()
+                window.tabs.setCurrentIndex(1)
+                self.app.processEvents()
+                for text in ("30", "2.01", "0.19", "nan", "abc", ""):
+                    with self.subTest(text=text):
+                        window.error.reset_mock()
+                        window.cooldown.setFocus()
+                        window.cooldown.selectAll()
+                        QTest.keyClick(window.cooldown, Qt.Key.Key_Backspace)
+                        QTest.keyClicks(window.cooldown, text)
+                        QTest.mouseClick(window.save_button, Qt.MouseButton.LeftButton)
+                        window.error.assert_called_once()
+                        self.assertEqual(config.path.read_bytes(), before)
+                        self.assertEqual(sender.cooldown, DEFAULT_CONFIG["cooldown"])
+                controller.hotkeys.configure.assert_not_called()
+            finally:
+                window.timer.stop()
+                window.hide()
+                window.deleteLater()
+                self.app.processEvents()
 
     def test_widgets_render_and_close_to_background(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as directory:
