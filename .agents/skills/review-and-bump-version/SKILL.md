@@ -1,6 +1,6 @@
 ---
 name: review-and-bump-version
-description: 在 ValorantToxicTamer 完成代码、界面、文档或构建改动后，自动审核本次修改，按重大、中等、小更新判定版本级别，并同步应用版本、README，自动重新打包 EXE 并上传 GitHub Release；Release 标题只能是 vx.y.z 形式的纯版本号。先判断是否与软件有关；仅无关软件的改动可不升版。只读咨询、仅审核和仅维护 skill 时不自动升版；用户明确要求升版时执行。
+description: 在 ValorantToxicTamer 完成代码、界面、文档或构建改动后，自动审核本次修改，按重大、中等、小更新判定版本级别，并同步应用版本、README，自动重新打包 EXE 并上传 GitHub Release：main 为正式版，Beta 为预发布；Release 标题只能是 vx.y.z 形式的纯版本号。先判断是否与软件有关；仅无关软件的改动可不升版。只读咨询、仅审核和仅维护 skill 时不自动升版；用户明确要求升版时执行。
 ---
 
 # 审核改动并更新版本
@@ -40,6 +40,20 @@ description: 在 ValorantToxicTamer 完成代码、界面、文档或构建改�
 - 以本次任务开始前的版本为基线，同一批修改只升一次；重试打包、重复审核、修复该批问题都沿用目标版本。若该批已升版，检查并补齐同步项，不重复累加。
 - 没有实际改动时不升版；仅无关软件的改动可以不升版，按「升版前提」判断；仅维护 `.agents/skills/` 时默认不触发应用发版。确需调整已升版本的级别时，从原基线重新计算。
 
+## 分支与发布渠道
+
+构建前使用 `git branch --show-current` 确认实际分支，并按下表确定推送目标、构建来源和发布渠道。分支名大小写以仓库实际名称为准，当前为 `main` 和 `Beta`；不得默认把 Beta 的修改推送到 main，也不自动合并两个分支。
+
+| 来源分支 | 代码推送目标 | Release 类型 | Latest | Git 标签示例 | Release title 示例 |
+| --- | --- | --- | --- | --- | --- |
+| `main` | `origin/main` | 正式版，`prerelease=false` | 是 | `v1.2.3` | `v1.2.3` |
+| `Beta` | `origin/Beta` | 预发布，`prerelease=true` | 否 | `v1.2.3-beta` | `v1.2.3` |
+
+- 两个分支的应用内版本和 README 当前版本仍遵循 `x.y.z` / `vx.y.z`，Release title 始终是纯版本号；`-beta` 只用于 Beta 的 Git 标签，避免与正式版同版本标签冲突。
+- EXE 必须由对应来源分支的本次提交重新构建，不能跨分支复用 `dist/` 中的旧产物。附件名仍为 `ValorantToxicTamer.exe`。
+- Beta 预发布明确设置 `prerelease=true` 和 `latest=false`，不得替换正式版 Latest；main 正式发布明确设置 `prerelease=false` 和 `latest=true`。
+- 其他分支或 detached HEAD 不自动推送或发布，先明确发布来源。用户另行指定推送分支时，必须确保构建提交属于该分支，再按该分支选择渠道。
+
 ## 同步源码、README 和 EXE
 
 当前项目的版本和构建入口如下，执行时核实文件仍然适用：
@@ -60,21 +74,21 @@ description: 在 ValorantToxicTamer 完成代码、界面、文档或构建改�
 
 ## 自动发布 GitHub Release
 
-仅在本次确实更新版本号，或补齐该批已升版本的发版流程时执行。测试、构建或打包检查未通过时停止发布，不能上传旧 EXE 充当新版本。
+仅在本次确实更新版本号，或补齐该批已升版本的发版流程时执行。测试、构建或打包检查未通过时停止发布，不能上传旧 EXE 充当新版本。发布渠道由「分支与发布渠道」确定，不能全部按正式版处理。
 
 1. 核对 `origin` 的目标仓库与 `valorant_toxic_tamer/updater.py` 中的 `REPOSITORY` 一致；当前为 `TimeseekerKK/ValorantToxicTamer`。使用可用的 GitHub 工具或已登录的 `gh`，检查发布权限；权限不足时说明阻塞，不输出凭据。
-2. 审核并提交本次软件改动、版本号和 README，推送到已确定的发布分支。只包含本次授权内容；不得夹带无关修改、个人数据或构建目录。已完成的提交和推送直接核实并复用。记录完整提交 SHA，确保本次构建的源码与该提交一致，构建后若又修改软件源码则重新检查并打包。
-3. 以 `v` 加 `VERSION` 作为唯一目标版本，例如 `v1.0.0`。检查远端同名标签和 Release；缺少标签时为上述准确提交创建并推送标签，已有标签必须指向同一提交，不能默认指向远端分支最新提交。若冲突则停止并说明原因，不强制移动标签。
-4. **Release title 必须与版本标签完全相同，只能填写纯版本号**，满足 `^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`，例如 `v1.0.0`。不得添加软件名、更新说明、空格、日期或其他前后缀；变更说明放在 Release 正文。
-5. 先创建草稿 Release，标题显式设置为目标版本，并上传本次生成的 `dist/ValorantToxicTamer.exe`，附件名保持 `ValorantToxicTamer.exe`。正文用简体中文说明本次改动及实际验证结果；使用 CLI 时通过正文文件传入多行内容。核对标签、标题和附件，并确认目标版本高于现有最新正式版本后，发布为正式 Release（非草稿、非预发布），设为 Latest，以供应用检查更新。版本落后时停止发布，先解决版本基线冲突。
-6. 重试前先查询同版本的远端状态，沿用原目标版本，不再升版或重复创建 Release。已有草稿核实后补齐缺项；已发布且标签、标题、附件均匹配时视为已完成。已发布内容冲突时停止并说明，不擅自删除 Release、覆盖附件或使用 `--clobber` 替换用户已经下载的文件。
-7. 发布后重新读取 Release，确认标题等于版本标签、标签指向对应提交、正式发布状态及 Latest 指向正确，并核对附件名、上传状态、大小和 SHA-256。优先使用服务端附件摘要；不可用时下载附件校验。记录并交付 Release 链接；上传或发布失败时说明远端当前状态，不声称发版完成。
+2. 审核并提交本次软件改动、版本号和 README，推送到来源分支对应的远端分支：main → `origin/main`，Beta → `origin/Beta`。只包含本次授权内容；不得夹带无关修改、个人数据或构建目录。已完成的提交和推送直接核实并复用。记录完整提交 SHA，确保本次构建的源码与该提交一致，构建后若又修改软件源码则重新检查并打包。
+3. 定义纯版本号为 `v` 加 `VERSION`，例如 `v1.2.3`；main 的目标标签为 `v1.2.3`，Beta 的目标标签为 `v1.2.3-beta`。检查该渠道的远端同名标签和 Release；缺少标签时为上述准确提交创建并推送标签，已有标签必须指向同一提交，不能默认指向远端默认分支最新提交。若冲突则停止并说明原因，不强制移动标签。
+4. **Release title 只能填写纯版本号**，满足 `^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`，例如 `v1.2.3`。main 的标题等于其标签，Beta 的标题为标签去掉 `-beta` 后的纯版本号。标题不得添加软件名、Beta 后缀、更新说明、空格、日期或其他前后缀；变更说明及渠道信息放在 Release 正文。
+5. 先创建草稿 Release，标题显式设置为纯版本号，并上传对应分支本次生成的 `dist/ValorantToxicTamer.exe`，附件名保持 `ValorantToxicTamer.exe`。正文用简体中文说明本次改动、来源分支及实际验证结果；使用 CLI 时通过正文文件传入多行内容。核对提交、标签、标题和附件后按渠道发布：main 确认版本高于现有最新正式版，再设为非草稿、非预发布并标记 Latest；Beta 设为非草稿、预发布，且明确不标记 Latest。Beta 按同渠道的历史版本核对顺序，不能因版本较高而替换正式版 Latest。版本基线冲突时停止发布并说明原因。
+6. 重试前按渠道标签查询远端状态，沿用原目标版本，不再升版或重复创建 Release。已有草稿核实后补齐缺项；已发布且提交、标签、标题、预发布状态和附件均匹配时视为已完成。已发布内容冲突时停止并说明，不擅自删除 Release、切换发布渠道、覆盖附件或使用 `--clobber` 替换用户已经下载的文件。Beta 转正式版应从 main 的提交构建并使用正式标签，不直接把 Beta Release 改成正式版。
+7. 发布后重新读取 Release，确认标题为对应纯版本号、渠道标签指向对应提交、`draft=false`，并检查 main 的 `prerelease=false` / Latest 指向正确，或 Beta 的 `prerelease=true` / 未被设为 Latest。核对附件名、上传状态、大小和 SHA-256，优先使用服务端附件摘要，不可用时下载附件校验。记录并交付 Release 链接及渠道；上传或发布失败时说明远端当前状态，不声称发版完成。
 
-GitHub CLI 参数以官方文档为准：[创建 Release](https://cli.github.com/manual/gh_release_create)、[编辑 Release](https://cli.github.com/manual/gh_release_edit)、[上传附件](https://cli.github.com/manual/gh_release_upload)。`--verify-tag` 只检查远端标签存在，仍须单独核对其提交；不要依赖默认分支自动创建标签。
+GitHub CLI 参数以官方文档为准：[创建 Release](https://cli.github.com/manual/gh_release_create)、[编辑 Release](https://cli.github.com/manual/gh_release_edit)、[上传附件](https://cli.github.com/manual/gh_release_upload)。发布草稿时 main 使用 `--draft=false --prerelease=false --latest=true`，Beta 使用 `--draft=false --prerelease=true --latest=false`；创建 Beta 草稿时也显式设置 `--prerelease --latest=false`。`--verify-tag` 只检查远端标签存在，仍须单独核对其提交；不要依赖默认分支自动创建标签。
 
 ## 核对与交付
 
 - 确认源码与 README 的当前版本一致，构建及打包检查成功，EXE 为本次版本修改后生成。
 - 通过项目可用的产物检查方式或运行新 EXE，核实其中的应用版本；若只能确认构建来源，准确注明运行时版本尚未验证。自动测试和静态检查不等于真实游戏验证。
 - 检查最终 diff，避免修改与当前版本无关的数字、测试中的示例标签或用户个人数据。
-- 交付时说明判定级别和依据、旧版 → 新版、README / EXE 的同步状态、实际检查结果、对应提交及 GitHub Release 链接，并如实说明剩余问题。仅无关软件的改动无需发版。
+- 交付时说明判定级别和依据、旧版 → 新版、README / EXE 的同步状态、实际检查结果、来源分支、发布渠道、对应提交及 GitHub Release 链接，并如实说明剩余问题。仅无关软件的改动无需发版。
