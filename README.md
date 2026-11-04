@@ -1,4 +1,4 @@
-# ValorantToxicTamer · v1.3.0
+# ValorantToxicTamer · v1.4.0-beta.1
 
 **Valorant反嘴臭工具**。Windows 托盘快捷消息工具，支持自定义消息及队伍、全体聊天快捷发送。目标运行环境为 Windows 10 / 11、Python 3.11、PySide6。
 
