@@ -1,3 +1,3 @@
 """Keep this version in sync with the GitHub Release tag when publishing."""
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
