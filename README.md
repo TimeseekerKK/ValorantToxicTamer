@@ -1,4 +1,4 @@
-# ValorantToxicTamer · v1.2.0-beta.1
+# ValorantToxicTamer · v1.2.0
 
 **Valorant反嘴臭工具**。Windows 托盘快捷消息工具，支持自定义消息及队伍、全体聊天快捷发送。目标运行环境为 Windows 10 / 11、Python 3.11、PySide6。
 
@@ -85,7 +85,7 @@ py -3.11 -m venv .venv
 
 更新查询和下载使用 Windows 原生证书信任链，保持 HTTPS 证书与主机名校验。若仍提示证书校验失败，请检查系统日期时间、Windows 证书更新，以及代理或安全软件的 HTTPS 证书设置，然后重试。
 
-当前版本为 Beta 预发布，仍只检查正式 Release；版本比较支持 `beta.N`，同基础号正式版高于 Beta，较低基础号不会覆盖当前版本。
+当前版本为正式版，仅检查正式 Release；版本比较支持 `beta.N`，同基础号正式版高于 Beta，较低基础号不会覆盖当前版本。
 
 正式发布时使用 `v1.2.3` 形式的版本标签，Beta 使用 `v1.2.3-beta.1`；同步修改 `valorant_toxic_tamer/app_version.py` 中的 `VERSION`，并上传单文件 `ValorantToxicTamer.exe`。通过 `scripts/build.ps1` 打包时会一并包含独立更新脚本和证书验证依赖。
 
