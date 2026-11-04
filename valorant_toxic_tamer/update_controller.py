@@ -66,7 +66,7 @@ class UpdateController(QObject):
             return
         if worker.error:
             self._idle()
-            self.window.result_label.setText("更新未完成。")
+            self.window.result_label.setText("检查更新失败。" if self.stage == "check" else "更新未完成。")
             self.window.error(worker.error)
             return
         if self.stage == "check":

@@ -6,14 +6,17 @@ import os
 from pathlib import Path
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import tempfile
 import threading
 import time
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
+
+import truststore
 
 from .app_version import VERSION
 
@@ -24,10 +27,28 @@ EXE_NAME = "ValorantToxicTamer.exe"
 
 
 def version_tuple(value):
-    match = re.fullmatch(r"[vV]?(\d+)\.(\d+)(?:\.(\d+))?", value)
+    match = re.fullmatch(r"[vV]?(\d+)\.(\d+)(?:\.(\d+))?(?:(-beta)(?:\.([1-9]\d*))?)?", value)
     if not match:
-        raise ValueError(f"无法识别版本号：{value}（应为 v1.2.3 格式）")
-    return tuple(int(part or 0) for part in match.groups())
+        raise ValueError(f"无法识别版本号：{value}（应为 v1.2.3 或 v1.2.3-beta.1 格式）")
+    major, minor, patch, beta, number = match.groups()
+    return (int(major), int(minor), int(patch or 0), int(beta is None), int(number or 0))
+
+
+def _open_update_url(request):
+    # Use Windows chain building, including intermediate certificate retrieval,
+    # for both the API request and redirected release downloads.
+    context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    try:
+        return urlopen(request, timeout=20, context=context)
+    except (URLError, ssl.SSLCertVerificationError) as exc:
+        reason = exc.reason if isinstance(exc, URLError) else exc
+        if isinstance(reason, ssl.SSLCertVerificationError):
+            raise ValueError(
+                "HTTPS 证书校验失败，无法安全连接更新服务器。\n"
+                "请检查 Windows 日期和时间、系统证书更新，以及代理或安全软件的 HTTPS 证书设置。\n"
+                "修复后请重新检查更新。"
+            ) from exc
+        raise
 
 
 @dataclass(frozen=True)
@@ -43,7 +64,7 @@ def latest_release(current=VERSION):
         "Accept": "application/vnd.github+json", "User-Agent": f"ValorantToxicTamer/{VERSION}",
     })
     try:
-        with urlopen(request, timeout=20) as response:
+        with _open_update_url(request) as response:
             payload = json.load(response)
     except HTTPError as exc:
         if exc.code == 404:
@@ -100,7 +121,7 @@ def download_release(release, target, cancel):
             digest = hashlib.sha256()
             received = 0
             deadline = time.monotonic() + 600
-            with urlopen(request, timeout=20) as response:
+            with _open_update_url(request) as response:
                 while True:
                     if cancel.is_set():
                         raise ValueError("更新已取消。")
