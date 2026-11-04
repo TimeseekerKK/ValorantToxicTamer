@@ -306,7 +306,11 @@ class CoreTests(unittest.TestCase):
     def test_config_defaults_and_validation(self):
         config = ConfigManager(self.path / "config.json")
         self.assertEqual(config.value, DEFAULT_CONFIG)
-        for key, value in (("cooldown", 0.49), ("cooldown", float("nan")), ("cooldown", True),
+        for seconds in (0.2, 0.49, 0.5, 1.25, 2):
+            with self.subTest(seconds=seconds):
+                validate_config({**DEFAULT_CONFIG, "cooldown": seconds})
+        for key, value in (("cooldown", 0.199), ("cooldown", 2.001),
+                           ("cooldown", float("nan")), ("cooldown", True),
                            ("team_hotkey", "F12"), ("team_hotkey", "F9"), ("autostart", 1)):
             with self.subTest(key=key, value=value), self.assertRaises(ValueError):
                 validate_config({**DEFAULT_CONFIG, key: value})

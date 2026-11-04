@@ -1,12 +1,14 @@
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
-    QFormLayout, QFrame, QHBoxLayout, QInputDialog, QLabel, QListWidget,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog,
+    QFormLayout, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
     QMainWindow, QMessageBox, QPushButton, QTabWidget, QVBoxLayout, QWidget)
 
 from config_manager import HOTKEYS
+from app_version import VERSION
 from tray import app_icon
+from update_controller import UpdateController
 
 
 STYLE = """
@@ -26,7 +28,7 @@ QListWidget::item:selected { background: #31475f; color: white; }
 QTabWidget::pane { border: 0; }
 QTabBar::tab { padding: 11px 24px; background: #192535; }
 QTabBar::tab:selected { border-bottom: 3px solid #ff5364; }
-QComboBox, QDoubleSpinBox, QLineEdit { background: #223247; padding: 6px; border: 1px solid #425971; }
+QComboBox, QLineEdit { background: #223247; padding: 6px; border: 1px solid #425971; }
 QMenu { background: #192535; }
 QMenu::item { padding: 7px 22px; }
 QMenu::item:selected { background: #31475f; }
@@ -38,7 +40,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.messages, self.config, self.sender = messages, config, sender
         self.save_settings = save_settings
-        self.setWindowTitle("ValorantToxicTamer · V1.0")
+        self.setWindowTitle(f"ValorantToxicTamer · V{VERSION}")
         self.setWindowIcon(app_icon())
         self.resize(880, 740)
         self.setMinimumSize(700, 620)
@@ -102,15 +104,16 @@ class MainWindow(QMainWindow):
         self.team_key, self.all_key = QComboBox(), QComboBox()
         for box in (self.team_key, self.all_key):
             box.addItems(HOTKEYS)
-        self.cooldown = QDoubleSpinBox()
-        self.cooldown.setRange(0.5, 10)
-        self.cooldown.setSingleStep(0.1)
-        self.cooldown.setSuffix(" 秒")
+        self.cooldown = QLineEdit()
+        self.cooldown.setPlaceholderText("例如 0.8")
+        cooldown_row = QHBoxLayout()
+        cooldown_row.addWidget(self.cooldown, 1)
+        cooldown_row.addWidget(QLabel("秒（0.2–2）"))
         self.start_hidden = QCheckBox("启动后隐藏到系统托盘")
         self.autostart = QCheckBox("随 Windows 登录自动启动")
         form.addRow("队伍聊天快捷键", self.team_key)
         form.addRow("全体聊天快捷键", self.all_key)
-        form.addRow("共用发送冷却", self.cooldown)
+        form.addRow("共用发送冷却", cooldown_row)
         form.addRow("后台运行", self.start_hidden)
         form.addRow("程序启动", self.autostart)
         fixed = QLabel("关闭主窗口始终隐藏到托盘；完全退出请使用托盘菜单。")
@@ -120,6 +123,10 @@ class MainWindow(QMainWindow):
         self.save_button.setObjectName("primary")
         self.save_button.clicked.connect(self.apply_settings)
         form.addRow(self.save_button)
+        self.update_button = QPushButton("检查更新")
+        self.updater = UpdateController(self)
+        self.update_button.clicked.connect(self.updater.check)
+        form.addRow(f"当前版本：V{VERSION}", self.update_button)
         path_label = QLabel(f"本地数据：{messages.path.parent}")
         path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         path_label.setWordWrap(True)
@@ -144,15 +151,19 @@ class MainWindow(QMainWindow):
         value = self.config.value
         self.team_key.setCurrentText(value["team_hotkey"])
         self.all_key.setCurrentText(value["all_hotkey"])
-        self.cooldown.setValue(value["cooldown"])
+        self.cooldown.setText(str(value["cooldown"]))
         self.start_hidden.setChecked(value["start_hidden"])
         self.autostart.setChecked(value["autostart"])
 
     def apply_settings(self):
-        value = dict(team_hotkey=self.team_key.currentText(), all_hotkey=self.all_key.currentText(),
-                     cooldown=self.cooldown.value(), start_hidden=self.start_hidden.isChecked(),
-                     autostart=self.autostart.isChecked())
         try:
+            try:
+                cooldown = float(self.cooldown.text().strip())
+            except ValueError:
+                raise ValueError("请输入有效的冷却时间（0.2–2 秒）。") from None
+            value = dict(team_hotkey=self.team_key.currentText(), all_hotkey=self.all_key.currentText(),
+                         cooldown=cooldown, start_hidden=self.start_hidden.isChecked(),
+                         autostart=self.autostart.isChecked())
             self.sender.edit(lambda: self.save_settings(value))
             self.result_label.setText("设置已保存。")
         except (OSError, ValueError) as exc:
