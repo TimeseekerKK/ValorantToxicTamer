@@ -154,7 +154,7 @@ def plan(snapshot, current, *, level=None, promote=None, resume=None, expected_c
             state = "tagged"
         release = releases.get(tag)
         if release:
-            if release["name"] != "v" + base_text(target) or release["prerelease"] != (branch == "Beta"):
+            if release["name"] != tag or release["prerelease"] != (branch == "Beta"):
                 raise ValueError("Existing release title/channel does not match the plan.")
             state = "draft" if release["draft"] else "published"
         if target <= stable and not (state == "published" and (branch == "Beta" or target == stable)):
@@ -206,7 +206,7 @@ def plan(snapshot, current, *, level=None, promote=None, resume=None, expected_c
         "branch": branch, "repository": snapshot["repository"],
         "baseline": "v" + base_text(stable), "current_version": current,
         "version": tag.removeprefix("v"), "base_version": base_text(target),
-        "tag": tag, "title": "v" + base_text(target),
+        "tag": tag, "title": tag,
         "prerelease": branch == "Beta", "latest": branch == "main",
         "status": state, "reason": reason, "promotion_source": source,
     }

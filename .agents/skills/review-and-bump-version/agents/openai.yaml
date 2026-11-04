@@ -1,6 +1,6 @@
 interface:
   display_name: "审核改动并更新版本"
   short_description: "先核对远端再计算正式版或 beta.N，重打包 EXE 并按 main/Beta 渠道发布"
-  default_prompt: "使用 $review-and-bump-version 审核本次改动，预检远端版本并用脚本计算 major/minor/patch 或 beta.N，处理旧版本线关闭、Beta 晋升及失败重试，同步版本和 README、重打包 EXE 并按分支发布；Release 标题保持纯基础版本号。"
+  default_prompt: "使用 $review-and-bump-version 审核本次改动，预检远端版本并用脚本计算 major/minor/patch 或 beta.N，处理旧版本线关闭、Beta 晋升及失败重试，同步版本和 README、重打包 EXE 并按分支发布；Release 标题与完整标签一致，Beta 保留 -beta.N。"
 policy:
   allow_implicit_invocation: true

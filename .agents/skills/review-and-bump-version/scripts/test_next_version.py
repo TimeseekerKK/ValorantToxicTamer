@@ -19,7 +19,7 @@ def snapshot(branch="main", stable="v1.2.3", betas=()):
     return {
         "branch": branch, "repository": nv.REPOSITORY, "local_tags": {},
         "remote_tags": {tag: SHA for tag in tags},
-        "releases": [{"tag_name": tag, "name": tag.split("-beta")[0],
+        "releases": [{"tag_name": tag, "name": tag,
                       "draft": False, "prerelease": "-beta" in tag} for tag in tags],
     }
 
@@ -42,7 +42,7 @@ class NumberingTests(unittest.TestCase):
                 result = nv.plan(snapshot("Beta"), "1.2.3", level=level)
                 self.assertEqual(result["tag"], expected)
                 self.assertEqual(result["version"], expected[1:])
-                self.assertEqual(result["title"], expected.split("-beta")[0])
+                self.assertEqual(result["title"], expected)
                 self.assertTrue(result["prerelease"])
                 self.assertFalse(result["latest"])
 
@@ -106,7 +106,7 @@ class NumberingTests(unittest.TestCase):
     def test_resume_does_not_increment(self):
         data = snapshot("Beta")
         data["remote_tags"]["v1.3.0-beta.1"] = SHA
-        data["releases"].append(dict(tag_name="v1.3.0-beta.1", name="v1.3.0", draft=True, prerelease=True))
+        data["releases"].append(dict(tag_name="v1.3.0-beta.1", name="v1.3.0-beta.1", draft=True, prerelease=True))
         result = nv.plan(data, "1.3.0-beta.1", resume="v1.3.0-beta.1", expected_commit=SHA)
         self.assertEqual(result["tag"], "v1.3.0-beta.1")
         self.assertEqual(result["status"], "draft")
@@ -162,13 +162,13 @@ class NumberingTests(unittest.TestCase):
     def test_closed_beta_draft_cannot_be_published_by_resume(self):
         data = snapshot("Beta", stable="v1.3.0")
         data["remote_tags"]["v1.3.0-beta.2"] = SHA
-        data["releases"].append(dict(tag_name="v1.3.0-beta.2", name="v1.3.0", draft=True, prerelease=True))
+        data["releases"].append(dict(tag_name="v1.3.0-beta.2", name="v1.3.0-beta.2", draft=True, prerelease=True))
         with self.assertRaisesRegex(ValueError, "closed"):
             nv.plan(data, "1.3.0-beta.2", resume="v1.3.0-beta.2", expected_commit=SHA)
 
     def test_resume_wrong_title_stops(self):
         data = snapshot("Beta", betas=["v1.3.0-beta.2"])
-        data["releases"][-1]["name"] = "v1.3.0-beta.2"
+        data["releases"][-1]["name"] = "v1.3.0"
         with self.assertRaisesRegex(ValueError, "title/channel"):
             nv.plan(data, "1.3.0-beta.2", resume="v1.3.0-beta.2", expected_commit=SHA)
 
