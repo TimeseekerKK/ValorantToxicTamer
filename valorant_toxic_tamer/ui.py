@@ -11,9 +11,10 @@ from .config_manager import FONT_SIZES, HOTKEYS
 from .app_version import VERSION
 from .tray import app_icon
 from .update_controller import UpdateController
+from .updater import UPDATE_CHANNELS
 from .ui_theme import (MUTED, RED, TEXT, CutButton, CutComboBox, CutLineEdit,
                       CutTabBar, MessageDialog, Panel, TacticalCheckBox, style_for_font_size,
-                      style_message_box)
+                      style_message_box, UpdateButton)
 
 
 def label(text, name=None, wrap=False):
@@ -341,16 +342,30 @@ class MainWindow(QMainWindow):
         right.setMinimumWidth(260)
         about = QVBoxLayout(right)
         about.setContentsMargins(24, 24, 24, 22)
-        about.setSpacing(20)
+        about.setSpacing(14)
         about.addWidget(label("版本与更新", "section"))
+        brand_row = QHBoxLayout()
         brand_icon = QLabel()
-        brand_icon.setPixmap(self.windowIcon().pixmap(58, 58))
-        about.addWidget(brand_icon)
-        about.addWidget(label("ValorantToxicTamer", wrap=True))
-        about.addWidget(label(f"当前版本   V{VERSION}"))
-        self.update_button = self.button("检查更新", lambda: self.updater.check(),
-                                         icon=QStyle.StandardPixmap.SP_BrowserReload)
-        self.update_button.setMaximumWidth(200)
+        brand_icon.setPixmap(self.windowIcon().pixmap(44, 44))
+        brand_row.addWidget(brand_icon)
+        brand_details = QVBoxLayout()
+        brand_details.addWidget(label("ValorantToxicTamer", wrap=True))
+        brand_details.addWidget(label(f"当前版本   V{VERSION}", "muted", True))
+        brand_row.addLayout(brand_details, 1)
+        about.addLayout(brand_row)
+        about.addWidget(separator())
+        self.update_channel = CutComboBox(wheel_changes=False)
+        self.update_channel.setAccessibleName("更新渠道")
+        for key, title in UPDATE_CHANNELS.items():
+            self.update_channel.addItem(title, key)
+        channel_caption = label("更新渠道 · 自动保存", "muted")
+        channel_caption.setBuddy(self.update_channel)
+        about.addWidget(channel_caption)
+        about.addWidget(self.update_channel)
+        self.update_channel_hint = label("", "muted", True)
+        about.addWidget(self.update_channel_hint)
+        self.update_button = UpdateButton()
+        self.update_button.clicked.connect(lambda: self.updater.check())
         self.updater = UpdateController(self)
         about.addWidget(self.update_button)
         about.addWidget(separator())

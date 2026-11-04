@@ -19,6 +19,7 @@ from valorant_toxic_tamer.message_manager import MessageManager
 from valorant_toxic_tamer.sender import Sender
 from valorant_toxic_tamer.ui import MainWindow
 from valorant_toxic_tamer.updater import Release
+from valorant_toxic_tamer.app_version import VERSION
 
 
 class UpdateUITests(unittest.TestCase):
@@ -37,7 +38,7 @@ class UpdateUITests(unittest.TestCase):
         self.updater = self.window.updater
         self.ready = Mock()
         self.updater.ready_to_install.connect(self.ready)
-        self.release = Release("v1.1.0", "https://example.test/exe", 5, None)
+        self.release = Release("v9.0.0", "https://example.test/exe", 5, None)
 
     def tearDown(self):
         self.updater.shutdown()
@@ -137,7 +138,7 @@ class UpdateUITests(unittest.TestCase):
     def test_background_check_keeps_events_responsive_and_ignores_double_click(self):
         unblock = threading.Event()
         self.addCleanup(unblock.set)
-        def lookup():
+        def lookup(**kwargs):
             unblock.wait(3)
             return None
         with patch("valorant_toxic_tamer.update_controller.latest_release", side_effect=lookup) as lookup_mock, \
@@ -145,11 +146,62 @@ class UpdateUITests(unittest.TestCase):
             self.window.update_button.click()
             QTest.qWait(50)
             self.assertFalse(self.window.update_button.isEnabled())
+            self.assertFalse(self.window.update_channel.isEnabled())
+            self.assertTrue(self.window.update_button.animation.isActive())
             self.updater.check()
             self.assertEqual(lookup_mock.call_count, 1)
             self.assertTrue(self.updater.busy)
             unblock.set()
             self.wait_until(lambda: not self.updater.busy)
+            self.assertTrue(self.window.update_channel.isEnabled())
+            self.assertFalse(self.window.update_button.animation.isActive())
+
+    def test_channel_is_saved_immediately_without_changing_application_config(self):
+        before = self.window.config.path.read_bytes()
+        self.assertEqual(self.updater.channel, "stable")
+        self.window.update_channel.setCurrentIndex(self.window.update_channel.findData("beta"))
+        self.assertEqual(self.updater.channel, "beta")
+        self.assertEqual(self.window.config.path.read_bytes(), before)
+        import json
+        self.assertEqual(json.loads(self.updater.preferences_path.read_text()), {"channel": "beta"})
+        with patch("valorant_toxic_tamer.update_controller.latest_release", return_value=None) as lookup, \
+                patch.object(self.window, "information"):
+            self.window.update_button.click()
+            self.wait_until(lambda: not self.updater.busy)
+            lookup.assert_called_once_with(channel="beta")
+        restarted = MainWindow(self.window.messages, self.window.config, self.sender, Mock())
+        try:
+            self.assertEqual(restarted.update_channel.currentData(), "beta")
+        finally:
+            restarted.updater.shutdown()
+            restarted.timer.stop()
+            restarted.deleteLater()
+
+    def test_channel_save_failure_restores_previous_choice(self):
+        before = self.updater.preferences_path.read_bytes()
+        with patch("valorant_toxic_tamer.update_controller.atomic_json", side_effect=OSError("disk full")):
+            self.window.update_channel.setCurrentIndex(self.window.update_channel.findData("beta"))
+        self.assertEqual(self.updater.channel, "stable")
+        self.assertEqual(self.window.update_channel.currentData(), "stable")
+        self.assertEqual(self.updater.preferences_path.read_bytes(), before)
+        self.window.error.assert_called_once()
+
+    def test_downgrade_warning_is_explicit_and_declining_preserves_program(self):
+        release = Release("v1.0.0", self.release.url, 5, None)
+        def decline(dialog):
+            self.assertIn("降级", dialog.text())
+            self.assertIn(f"当前版本：v{VERSION}", dialog.informativeText())
+            self.assertIn("目标版本：v1.0.0", dialog.informativeText())
+            self.assertEqual(dialog.icon(), QMessageBox.Icon.Warning)
+            self.assertEqual(dialog.defaultButton().text(), "否")
+            return QMessageBox.StandardButton.No
+        with patch("valorant_toxic_tamer.update_controller.latest_release", return_value=release), \
+                patch.object(QMessageBox, "exec", decline), \
+                patch("valorant_toxic_tamer.update_controller.download_release") as download:
+            self.window.update_button.click()
+            self.wait_until(lambda: not self.updater.busy)
+            download.assert_not_called()
+        self.ready.assert_not_called()
 
 
 if __name__ == "__main__":

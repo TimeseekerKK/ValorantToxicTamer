@@ -1,7 +1,7 @@
 """Shared, dependency-free Qt widget styling for the desktop UI."""
 import re
 
-from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt
+from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTabBar, QVBoxLayout, QWidget)
@@ -83,10 +83,24 @@ def paint_button(button):
     p.drawPath(cut_path(QRectF(button.rect()).adjusted(0.8, 0.8, -0.8, -0.8)))
     p.setPen(QColor(TEXT if enabled else "#62717f"))
     p.setFont(button.font())
-    icon_width = 22 if not button.icon().isNull() else 0
+    update_icon = bool(button.property("updateIcon"))
+    icon_width = 32 if update_icon else 22 if not button.icon().isNull() else 0
     text_width = button.fontMetrics().horizontalAdvance(button.text().replace("&", ""))
     start = (button.width() - text_width - icon_width) / 2
-    if icon_width:
+    if update_icon:
+        p.save()
+        p.translate(start + 10, button.height() / 2)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor("#22ffffff" if enabled else "#2262717f"))
+        p.drawEllipse(QRectF(-13, -13, 26, 26))
+        p.rotate(button.angle)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(QColor(TEXT if enabled or button.animation.isActive() else "#62717f"),
+                      1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        p.drawArc(QRectF(-6, -6, 12, 12), 40 * 16, 280 * 16)
+        p.drawPolyline(QPolygonF([QPointF(1.5, -4), QPointF(4.6, -3.8), QPointF(4.9, -7)]))
+        p.restore()
+    elif icon_width:
         mode = button.icon().Mode.Normal if enabled else button.icon().Mode.Disabled
         button.icon().paint(p, int(start), (button.height() - 16) // 2, 16, 16,
                             Qt.AlignmentFlag.AlignCenter, mode)
@@ -109,6 +123,34 @@ class CutButton(QPushButton):
 
     def paintEvent(self, event):
         paint_button(self)
+
+
+class UpdateButton(CutButton):
+    def __init__(self, parent=None):
+        super().__init__("检查更新", parent, primary=True)
+        self.setProperty("updateIcon", True)
+        self.setAccessibleName("检查更新")
+        self.setMinimumHeight(48)
+        self.angle = 0
+        self.animation = QTimer(self)
+        self.animation.setInterval(40)
+        self.animation.timeout.connect(self._advance)
+
+    def _advance(self):
+        self.angle = (self.angle + 12) % 360
+        self.update()
+
+    def set_busy(self, busy):
+        if busy:
+            self.animation.start()
+        else:
+            self.animation.stop()
+            self.angle = 0
+        self.update()
+
+    def sizeHint(self):
+        return QSize(self.fontMetrics().horizontalAdvance(self.text()) + 74,
+                     max(48, self.fontMetrics().height() + 24))
 
 
 class TacticalCheckBox(QCheckBox):
