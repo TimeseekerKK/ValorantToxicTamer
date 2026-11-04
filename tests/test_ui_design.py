@@ -3,18 +3,19 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QPoint, QRect, Qt, QTimer
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QScrollArea, QStyleOptionViewItem
 
 from valorant_toxic_tamer.config_manager import ConfigManager
 from valorant_toxic_tamer.message_manager import MessageManager
 from valorant_toxic_tamer.sender import Sender
 from valorant_toxic_tamer.ui import MainWindow
+from valorant_toxic_tamer.ui_theme import MessageDialog, style_message_box
 
 
 class DesignUITests(unittest.TestCase):
@@ -129,6 +130,177 @@ class DesignUITests(unittest.TestCase):
                        self.window.save_button, self.window.update_button):
             self.assertTrue(widget.parentWidget().rect().contains(widget.geometry()))
         self.assertEqual(self.window.list_widget.horizontalScrollBar().maximum(), 0)
+
+    def test_font_size_save_applies_to_list_dialogs_and_restart(self):
+        self.window.tabs.setCurrentIndex(1)
+        self.messages.replace(["消息换行测试" * 25])
+        self.window.reload_messages()
+        self.app.processEvents()
+        old_height = self.window.list_widget.sizeHintForRow(0)
+        self.window.font_size.setFocus()
+        QTest.keyClick(self.window.font_size, Qt.Key.Key_End)
+        self.assertEqual(self.window.font_size.currentData(), 16)
+        self.assertIn("未保存", self.window.settings_hint.text())
+        self.assertEqual(self.window.list_widget.font().pointSize(), 11)
+        QTest.mouseClick(self.window.save_button, Qt.MouseButton.LeftButton)
+        self.app.processEvents()
+        self.assertEqual(self.config.value["font_size"], 16)
+        self.assertEqual(ConfigManager(self.config.path).value["font_size"], 16)
+        self.assertEqual(self.window.list_widget.font().pointSize(), 16)
+        self.assertGreater(self.window.list_widget.sizeHintForRow(0), old_height)
+        self.assertEqual(self.window.next_label.font().pointSize(), 24)
+        for dialog in (MessageDialog(self.window, "添加消息"), QMessageBox(self.window)):
+            try:
+                if isinstance(dialog, QMessageBox):
+                    style_message_box(dialog)
+                dialog.ensurePolished()
+                self.assertEqual(dialog.font().pointSize(), 16)
+            finally:
+                dialog.deleteLater()
+        restarted = MainWindow(self.messages, ConfigManager(self.config.path), self.sender, self.config.save)
+        try:
+            restarted.ensurePolished()
+            self.assertEqual(restarted.font_size.currentData(), 16)
+            self.assertEqual(restarted.list_widget.font().pointSize(), 16)
+        finally:
+            restarted.timer.stop()
+            restarted.updater.shutdown()
+            restarted.deleteLater()
+
+    def test_wheel_over_font_size_scrolls_settings_without_changing_selection(self):
+        self.window.resize(860, 680)
+        self.window.tabs.setCurrentIndex(1)
+        box = self.window.font_size
+        scroll = self.window.tabs.currentWidget().findChild(QScrollArea)
+        before = self.config.path.read_bytes()
+        self.app.processEvents()
+        for focused in (False, True):
+            for delta in (-120, 120):
+                with self.subTest(focused=focused, delta=delta):
+                    (box if focused else self.window.save_button).setFocus()
+                    scroll.ensureWidgetVisible(box)
+                    self.app.processEvents()
+                    position = box.mapTo(self.window, box.rect().center())
+                    old_scroll = scroll.verticalScrollBar().value()
+                    QTest.wheelEvent(self.window.windowHandle(), position, QPoint(0, delta))
+                    self.app.processEvents()
+                    self.assertEqual(box.currentData(), 11)
+                    self.assertNotIn("未保存", self.window.settings_hint.text())
+                    self.assertEqual(self.config.path.read_bytes(), before)
+                    if delta < 0:
+                        self.assertGreater(scroll.verticalScrollBar().value(), old_scroll)
+                    else:
+                        self.assertLess(scroll.verticalScrollBar().value(), old_scroll)
+
+    def test_font_size_popup_still_accepts_mouse_selection(self):
+        self.window.tabs.setCurrentIndex(1)
+        box = self.window.font_size
+        scroll = self.window.tabs.currentWidget().findChild(QScrollArea)
+        scroll.ensureWidgetVisible(box)
+        self.app.processEvents()
+        QTest.mouseClick(box, Qt.MouseButton.LeftButton)
+        self.assertTrue(box.opened)
+        # Let Qt's guard against the popup-opening click expire before selection.
+        QTest.qWait(QApplication.doubleClickInterval() + 10)
+        target = box.model().index(box.findData(14), 0)
+        box.view().scrollTo(target)
+        self.app.processEvents()
+        QTest.mouseMove(box.view().viewport(), box.view().visualRect(target).center())
+        QTest.mouseClick(box.view().viewport(), Qt.MouseButton.LeftButton,
+                         pos=box.view().visualRect(target).center())
+        self.assertFalse(box.opened)
+        self.assertEqual(box.currentData(), 14)
+        self.assertIn("未保存", self.window.settings_hint.text())
+
+    def test_failed_font_save_keeps_previous_font_and_config(self):
+        self.window.font_size.setCurrentIndex(self.window.font_size.findData(16))
+        before = self.config.path.read_bytes()
+        with patch("valorant_toxic_tamer.config_manager.os.replace", side_effect=OSError("disk full")):
+            self.window.apply_settings()
+        self.window.error.assert_called_once()
+        self.assertEqual(self.config.path.read_bytes(), before)
+        self.assertEqual(self.window.font_size.currentData(), 11)
+        self.assertEqual(self.window.list_widget.font().pointSize(), 11)
+
+    def test_largest_font_keeps_controls_readable_at_minimum_window_size(self):
+        self.window.resize(860, 680)
+        self.window.font_size.setCurrentIndex(self.window.font_size.findData(16))
+        self.window.apply_settings()
+        self.app.processEvents()
+        for hint in (self.window.team_hint, self.window.all_hint):
+            self.assertGreaterEqual(hint.contentsRect().width(),
+                                    hint.fontMetrics().horizontalAdvance(hint.text()))
+        self.assertGreaterEqual(self.window.next_label.height(),
+                                self.window.next_label.fontMetrics().lineSpacing() * 3)
+        for button in self.window.edit_buttons:
+            self.assertTrue(button.parentWidget().rect().contains(button.geometry()))
+        self.window.tabs.setCurrentIndex(1)
+        self.app.processEvents()
+        # The settings page scrolls vertically; save remains outside the scroll area.
+        scroll = self.window.tabs.currentWidget().findChild(QScrollArea)
+        scroll.ensureWidgetVisible(self.window.font_size)
+        self.app.processEvents()
+        top_left = self.window.font_size.mapTo(scroll.viewport(), self.window.font_size.rect().topLeft())
+        self.assertTrue(scroll.viewport().rect().contains(top_left))
+        self.assertTrue(self.window.save_button.isVisible())
+        menu = QMenu(self.window)
+        menu.addAction("设置")
+        menu.ensurePolished()
+        self.assertEqual(menu.font().pointSize(), 16)
+        menu.deleteLater()
+
+    def test_long_preview_can_scroll_to_end_and_resets_for_next_message(self):
+        text = "长消息：" + "注意配合，等待队友一起行动。" * 30 + "末尾检查"
+        self.messages.replace([text, "下一条短消息"])
+        self.window.reload_messages()
+        self.window.resize(860, 680)
+        self.window.font_size.setCurrentIndex(self.window.font_size.findData(16))
+        self.window.apply_settings()
+        self.app.processEvents()
+        preview = self.window.next_label
+        self.assertEqual(preview.text(), text)
+        self.assertGreaterEqual(preview.height(), preview.heightForWidth(preview.width()))
+        scroll = self.window.tabs.widget(0).findChild(QScrollArea)
+        end = preview.mapTo(scroll.widget(), preview.rect().bottomLeft())
+        scroll.ensureVisible(end.x(), end.y(), 8, 8)
+        self.app.processEvents()
+        self.assertGreater(scroll.verticalScrollBar().value(), 0)
+        self.assertTrue(scroll.viewport().rect().contains(
+            preview.mapTo(scroll.viewport(), preview.rect().bottomLeft())))
+        self.messages.advance()
+        self.window.refresh_status()
+        self.app.processEvents()
+        self.assertEqual(preview.text(), "下一条短消息")
+        self.assertEqual(scroll.verticalScrollBar().value(), 0)
+        self.assertLess(preview.height(), scroll.viewport().height())
+
+    def test_four_digit_progress_wraps_instead_of_clipping_at_largest_font(self):
+        self.messages.replace(["测试消息"] * 1000)
+        self.messages.index = 999
+        self.window.reload_messages(999)
+        self.window.resize(860, 680)
+        self.window.font_size.setCurrentIndex(self.window.font_size.findData(16))
+        self.window.apply_settings()
+        self.app.processEvents()
+        progress = self.window.progress_label
+        self.assertIn("1000", progress.text())
+        self.assertTrue(progress.sizeHint().width() <= progress.width() or progress.wordWrap())
+        self.assertGreaterEqual(progress.height(), progress.heightForWidth(progress.width()))
+
+        delegate = self.window.list_widget.itemDelegate()
+        option = QStyleOptionViewItem()
+        index = self.window.list_widget.model().index(999, 0)
+        delegate.initStyleOption(option, index)
+        option.rect = QRect(0, 0, self.window.list_widget.viewport().width(), 80)
+        painter = Mock()
+        delegate.paint(painter, option, index)
+        number_rect = next(call.args[0] for call in painter.drawText.call_args_list
+                           if call.args[-1] == "1000")
+        text_rect = next(call.args[0] for call in painter.drawText.call_args_list
+                         if call.args[-1] == "测试消息")
+        self.assertGreaterEqual(number_rect.width(),
+                                option.fontMetrics.horizontalAdvance("1000"))
+        self.assertGreater(text_rect.left(), number_rect.right())
 
 
 if __name__ == "__main__":

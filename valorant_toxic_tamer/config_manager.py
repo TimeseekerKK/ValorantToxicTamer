@@ -15,8 +15,10 @@ DEFAULT_CONFIG = {
     "cooldown": 0.5,
     "start_hidden": True,
     "autostart": False,
+    "font_size": 11,
 }
 HOTKEYS = tuple(f"F{i}" for i in range(1, 12))  # F12 is reserved by Windows.
+FONT_SIZES = tuple(range(9, 17))
 
 
 def data_directory() -> Path:
@@ -56,8 +58,12 @@ def load_json(path: Path, default, validate):
 
 
 def validate_config(value):
-    if not isinstance(value, dict) or set(value) != set(DEFAULT_CONFIG):
+    if not isinstance(value, dict) or set(value) not in (
+            set(DEFAULT_CONFIG), set(DEFAULT_CONFIG) - {"font_size"}):
         raise ValueError("配置字段不完整或含未知字段")
+    font_size = value.get("font_size", DEFAULT_CONFIG["font_size"])
+    if type(font_size) is not int or font_size not in FONT_SIZES:
+        raise ValueError("字体大小须为 9–16 pt 的整数")
     if any(value[k] not in HOTKEYS for k in ("team_hotkey", "all_hotkey")):
         raise ValueError("快捷键须为 F1–F11")
     if value["team_hotkey"] == value["all_hotkey"]:
@@ -73,9 +79,12 @@ class ConfigManager:
     def __init__(self, path: Path):
         self.path = path
         self.value = load_json(path, DEFAULT_CONFIG, validate_config)
+        # Keep valid old files intact until the user explicitly saves settings.
+        self.value.setdefault("font_size", DEFAULT_CONFIG["font_size"])
 
     def save(self, value):
         validate_config(value)
+        value = {**DEFAULT_CONFIG, **value}
         atomic_json(self.path, value)
         self.value = value.copy()
 

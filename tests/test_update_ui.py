@@ -2,10 +2,12 @@
 import os
 from pathlib import Path
 import tempfile
+import ssl
 import threading
 import time
 import unittest
 from unittest.mock import Mock, patch
+from urllib.error import URLError
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -114,6 +116,23 @@ class UpdateUITests(unittest.TestCase):
                 else:
                     self.assertFalse(staged.exists())
         self.ready.assert_not_called()
+
+    def test_certificate_failure_restores_button_and_allows_retry(self):
+        error = URLError(ssl.SSLCertVerificationError(1, "unable to get issuer certificate"))
+        with patch("valorant_toxic_tamer.updater.urlopen", side_effect=error), \
+                patch("valorant_toxic_tamer.update_controller.download_release") as download:
+            self.window.update_button.click()
+            self.wait_until(lambda: not self.updater.busy)
+            self.assertIn("HTTPS 证书校验失败", self.window.error.call_args.args[0])
+            self.assertEqual(self.window.result_label.text(), "检查更新失败。")
+            self.assertTrue(self.window.update_button.isEnabled())
+            download.assert_not_called()
+        self.ready.assert_not_called()
+        with patch("valorant_toxic_tamer.update_controller.latest_release", return_value=None), \
+                patch.object(self.window, "information") as info:
+            self.window.update_button.click()
+            self.wait_until(lambda: not self.updater.busy)
+            info.assert_called_once()
 
     def test_background_check_keeps_events_responsive_and_ignores_double_click(self):
         unblock = threading.Event()

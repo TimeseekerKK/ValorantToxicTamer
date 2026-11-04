@@ -323,6 +323,28 @@ class CoreTests(unittest.TestCase):
             ConfigManager(path)
         self.assertEqual(path.read_bytes(), before)
 
+    def test_old_config_gets_default_font_without_rewriting_until_save(self):
+        path = self.path / "config.json"
+        legacy = {k: v for k, v in DEFAULT_CONFIG.items() if k != "font_size"}
+        legacy.update(team_hotkey="F6", cooldown=0.8)
+        path.write_text(json.dumps(legacy), encoding="utf-8")
+        before = path.read_bytes()
+        config = ConfigManager(path)
+        self.assertEqual(config.value, {**legacy, "font_size": 11})
+        self.assertEqual(path.read_bytes(), before)
+        config.save({**config.value, "font_size": 16})
+        self.assertEqual(ConfigManager(path).value, {**legacy, "font_size": 16})
+
+    def test_invalid_font_sizes_preserve_config_file(self):
+        path = self.path / "config.json"
+        for size in (8, 17, 11.0, True, "12", None):
+            with self.subTest(size=size):
+                path.write_text(json.dumps({**DEFAULT_CONFIG, "font_size": size}), encoding="utf-8")
+                before = path.read_bytes()
+                with self.assertRaises(ValueError):
+                    ConfigManager(path)
+                self.assertEqual(path.read_bytes(), before)
+
 
 if __name__ == "__main__":
     unittest.main()

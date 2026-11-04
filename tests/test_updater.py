@@ -1,12 +1,15 @@
 import hashlib
 import io
 import json
+import ssl
 from pathlib import Path
 import tempfile
 import threading
 import unittest
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError, URLError
+
+import truststore
 
 from valorant_toxic_tamer.updater import (EXE_NAME, LATEST_URL, REPOSITORY, Release, download_release,
                      installed_executable, latest_release, launch_installer, version_tuple)
@@ -27,19 +30,34 @@ class UpdaterTests(unittest.TestCase):
         self.payload = dict(tag_name="v1.1.0", prerelease=False, draft=False, assets=[self.asset])
         self.release = Release("v1.1.0", self.url, len(self.content), self.asset["digest"])
 
-    def lookup(self):
+    def lookup(self, current="1.0.0"):
         response = io.BytesIO(json.dumps(self.payload).encode())
         with patch("valorant_toxic_tamer.updater.urlopen", return_value=response) as request:
-            result = latest_release("1.0.0")
+            result = latest_release(current)
         self.assertEqual(request.call_args.args[0].full_url, LATEST_URL)
+        self.assert_verified_context(request)
         return result
+
+    def assert_verified_context(self, request):
+        context = request.call_args.kwargs["context"]
+        self.assertIsInstance(context, truststore.SSLContext)
+        self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
 
     def test_numeric_version_comparison_and_tag_formats(self):
         self.assertGreater(version_tuple("v1.10.0"), version_tuple("1.9.9"))
-        self.assertEqual(version_tuple("V1.0"), (1, 0, 0))
-        for invalid in ("", "latest", "v1.0.1-beta", "1.2.3.4"):
+        self.assertEqual(version_tuple("V1.0"), version_tuple("1.0.0"))
+        versions = ("1.2.0-beta", "1.2.0-beta.1", "1.2.0-beta.2", "1.2.0-beta.10",
+                    "1.2.0", "1.2.1-beta.1")
+        for older, newer in zip(versions, versions[1:]):
+            self.assertLess(version_tuple(older), version_tuple(newer))
+        for invalid in ("", "latest", "1.2.3.4", "1.2.3-beta.0", "1.2.3-beta.x", "1.2.3-rc.1"):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 version_tuple(invalid)
+
+    def test_beta_current_can_upgrade_to_same_base_stable_but_never_downgrades(self):
+        self.assertEqual(self.lookup("1.1.0-beta.2"), self.release)
+        self.assertIsNone(self.lookup("1.2.0-beta.1"))
 
     def test_newer_release_selects_expected_exe(self):
         self.payload["assets"] += [dict(self.asset, name="uninstaller.exe"),
@@ -91,11 +109,29 @@ class UpdaterTests(unittest.TestCase):
                     latest_release()
 
     def test_download_checks_bytes_and_preserves_installed_file(self):
-        with patch("valorant_toxic_tamer.updater.urlopen", return_value=io.BytesIO(self.content)):
+        with patch("valorant_toxic_tamer.updater.urlopen", return_value=io.BytesIO(self.content)) as request:
             staged = download_release(self.release, self.target, threading.Event())
+        self.assert_verified_context(request)
         self.assertEqual(staged.parent, self.target.parent)
         self.assertEqual(staged.read_bytes(), self.content)
         self.assertEqual(self.target.read_bytes(), b"old program")
+
+    def test_certificate_failures_are_explained_without_insecure_retry(self):
+        certificate_error = ssl.SSLCertVerificationError(1, "unable to get issuer certificate")
+        for error in (certificate_error, URLError(certificate_error)):
+            with self.subTest(error=error):
+                with patch("valorant_toxic_tamer.updater.urlopen", side_effect=error) as request:
+                    with self.assertRaisesRegex(ValueError, "HTTPS 证书校验失败"):
+                        latest_release("1.0.0")
+                request.assert_called_once()
+                self.assert_verified_context(request)
+                with patch("valorant_toxic_tamer.updater.urlopen", side_effect=error) as request:
+                    with self.assertRaisesRegex(ValueError, "HTTPS 证书校验失败"):
+                        download_release(self.release, self.target, threading.Event())
+                request.assert_called_once()
+                self.assert_verified_context(request)
+                self.assertEqual(list(self.directory.iterdir()), [self.target])
+                self.assertEqual(self.target.read_bytes(), b"old program")
 
     def test_corrupt_truncated_oversized_non_exe_downloads_are_cleaned(self):
         for content in (self.content[:-1], self.content + b"X", b"MZ" + b"X" * (len(self.content)-2)):
