@@ -81,7 +81,7 @@ py -3.11 -m venv .venv
 
 下载失败时保留当前版本；覆盖失败会显示错误并保留原文件，启动失败会尝试恢复旧 EXE。覆盖更新仅支持打包后的 Windows EXE，且程序所在目录须可写；源码运行不能覆盖 Python 解释器。仅检查正式 Release，不安装预发布版本或降级。
 
-发布时使用 `v1.2.3` 形式的版本标签，同步修改 `app_version.py` 中的 `VERSION`，并上传单文件 `ValorantToxicTamer.exe`。通过 `build.ps1` 打包时会一并包含独立更新脚本。
+发布时使用 `v1.2.3` 形式的版本标签，同步修改 `valorant_toxic_tamer/app_version.py` 中的 `VERSION`，并上传单文件 `ValorantToxicTamer.exe`。通过 `scripts/build.ps1` 打包时会一并包含独立更新脚本。
 
 ### 常见问题
 
@@ -96,6 +96,42 @@ py -3.11 -m venv .venv
 **如何备份消息，或迁移到另一份程序？**
 
 在「消息管理」中点击「TXT 导出」保存文件，再到目标程序中使用「TXT 导入」。导入会追加到已有列表。
+
+## 项目结构与开发
+
+```text
+ValorantToxicTamer/
+├── main.py                    # 源码和打包共用的启动入口
+├── valorant_toxic_tamer/       # 应用代码和随程序分发的更新脚本
+│   ├── app.py                 # 应用初始化和生命周期
+│   ├── ui.py / ui_theme.py    # 窗口和主题
+│   ├── config_manager.py      # 配置存储和开机启动
+│   ├── message_manager.py     # 消息管理
+│   ├── hotkey.py / sender.py  # 快捷键和发送流程
+│   ├── win32_api.py           # Windows 接口
+│   └── ...                    # 托盘、更新、日志和版本等模块
+├── scripts/                   # 构建脚本
+├── tests/                     # 自动测试、原生检查和预览工具
+├── docs/                      # 项目检查文档
+├── requirements.txt           # 运行依赖
+├── requirements-build.txt     # 构建依赖
+├── data/                      # 源码运行数据与本地个人文件（不提交）
+├── artifacts/                 # 检查报告和截图（不提交）
+├── build/                     # 构建中间文件和生成的 .spec（不提交）
+└── dist/                      # 打包产物（不提交）
+```
+
+在项目根目录执行自动测试和构建：
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
+.\scripts\build.ps1
+```
+
+源码启动仍使用 `main.py`，也支持 `.\.venv\Scripts\python.exe -m valorant_toxic_tamer`。应用内部使用包内相对导入，测试和辅助工具通过 `valorant_toxic_tamer` 导入模块。
+
+源码运行继续读写项目根目录的 `data/`；打包版继续使用 `%LOCALAPPDATA%\ValorantToxicTamer\data`。移动代码目录无需迁移已有消息或设置。UI 改版检查记录见 [docs/design-qa.md](docs/design-qa.md)。
 
 ## 许可证
 

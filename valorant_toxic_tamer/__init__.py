@@ -1,0 +1,1 @@
+"""ValorantToxicTamer desktop application."""

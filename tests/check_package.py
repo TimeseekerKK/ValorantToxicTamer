@@ -12,7 +12,7 @@ def check(path):
                   if Path(name).name.casefold() in ("icuuc.dll", "icuin.dll", "icudt.dll")]
     if collisions:
         raise RuntimeError(f"打包混入了可能与 Windows ICU 冲突的 DLL：{collisions}")
-    if "update_install.ps1" not in archive.toc:
+    if "valorant_toxic_tamer/update_install.ps1" not in {name.replace("\\", "/") for name in archive.toc}:
         raise RuntimeError("打包缺少覆盖安装所需的 update_install.ps1。")
     print(f"打包依赖检查通过：{path}")
 

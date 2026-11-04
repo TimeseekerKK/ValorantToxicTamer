@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from updater import launch_installer
+from valorant_toxic_tamer.updater import launch_installer
 
 
 @unittest.skipUnless(sys.platform == "win32", "Windows updater integration")
@@ -74,7 +74,7 @@ class Fixture {
                         and (other_directory / "old.marker").exists())
         helper = self.directory / "helper"
         helper.mkdir()
-        with patch("updater.tempfile.mkdtemp", return_value=str(helper)):
+        with patch("valorant_toxic_tamer.updater.tempfile.mkdtemp", return_value=str(helper)):
             installer = launch_installer(staged, target)
         self.processes.append(installer)
         self.wait_until(lambda: (self.directory / "new.marker").exists() or (helper / "error.txt").exists())
@@ -95,7 +95,7 @@ class Fixture {
         helper = self.directory / "helper"
         helper.mkdir()
         script = helper / "install.ps1"
-        shutil.copyfile(Path(__file__).resolve().parents[1] / "update_install.ps1", script)
+        shutil.copyfile(Path(__file__).resolve().parents[1] / "valorant_toxic_tamer" / "update_install.ps1", script)
         manifest = helper / "update.json"
         manifest.write_text(json.dumps(dict(target=str(target), staged=str(staged), pid=os.getpid(),
                                             sha256="0" * 64)), encoding="utf-8-sig")

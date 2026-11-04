@@ -15,7 +15,7 @@ from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-from app_version import VERSION
+from .app_version import VERSION
 
 
 REPOSITORY = "TimeseekerKK/ValorantToxicTamer"

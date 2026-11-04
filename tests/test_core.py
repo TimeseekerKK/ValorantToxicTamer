@@ -5,9 +5,9 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from config_manager import ConfigManager, DEFAULT_CONFIG, validate_config
-from message_manager import MessageManager, validate_messages
-from sender import Sender
+from valorant_toxic_tamer.config_manager import ConfigManager, DEFAULT_CONFIG, validate_config
+from valorant_toxic_tamer.message_manager import MessageManager, validate_messages
+from valorant_toxic_tamer.sender import Sender
 
 
 class FakeAPI:
@@ -274,7 +274,7 @@ class CoreTests(unittest.TestCase):
 
     def test_write_failure_keeps_memory_and_original(self):
         old = self.messages.path.read_bytes()
-        with patch("config_manager.os.replace", side_effect=OSError("disk full")):
+        with patch("valorant_toxic_tamer.config_manager.os.replace", side_effect=OSError("disk full")):
             with self.assertRaises(OSError):
                 self.messages.replace(["new"])
         self.assertEqual(self.messages.messages, ["你好", "B", "C"])

@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QSystemTrayIcon
 
 
 def run(app, report_path):
-    from main import Application
+    from .app import Application
 
     path = Path(report_path).resolve()
     path.parent.mkdir(parents=True, exist_ok=True)

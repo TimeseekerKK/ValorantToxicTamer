@@ -14,13 +14,13 @@ from PySide6.QtGui import QFontDatabase
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
-from config_manager import ConfigManager, DEFAULT_CONFIG
-from hotkey import Hotkeys
-from main import Application
-from message_manager import MessageManager
-from sender import Sender
-from ui import MainWindow
-from win32_api import INPUT, KEYBDINPUT, PROCESSENTRY32W, WindowsAPI
+from valorant_toxic_tamer.config_manager import ConfigManager, DEFAULT_CONFIG
+from valorant_toxic_tamer.hotkey import Hotkeys
+from valorant_toxic_tamer.app import Application
+from valorant_toxic_tamer.message_manager import MessageManager
+from valorant_toxic_tamer.sender import Sender
+from valorant_toxic_tamer.ui import MainWindow
+from valorant_toxic_tamer.win32_api import INPUT, KEYBDINPUT, PROCESSENTRY32W, WindowsAPI
 
 
 class WindowsTests(unittest.TestCase):
@@ -212,7 +212,7 @@ class WindowsTests(unittest.TestCase):
         controller.hotkeys.configure.side_effect = [False, True]
         controller.hotkeys.status = {"team": "冲突", "all": "注册成功"}
         from unittest.mock import patch
-        with patch("main.set_autostart") as registry:
+        with patch("valorant_toxic_tamer.app.set_autostart") as registry:
             with self.assertRaises(ValueError):
                 Application.save_settings(controller, {**DEFAULT_CONFIG, "autostart": True})
             registry.assert_not_called()

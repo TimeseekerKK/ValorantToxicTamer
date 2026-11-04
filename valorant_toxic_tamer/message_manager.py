@@ -1,7 +1,7 @@
 from pathlib import Path
 import unicodedata
 
-from config_manager import atomic_json, load_json
+from .config_manager import atomic_json, load_json
 
 
 def validate_messages(messages):

@@ -9,9 +9,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QWidget
-from config_manager import DEFAULT_CONFIG
-from hotkey import Hotkeys
-from win32_api import WindowsAPI
+from valorant_toxic_tamer.config_manager import DEFAULT_CONFIG
+from valorant_toxic_tamer.hotkey import Hotkeys
+from valorant_toxic_tamer.win32_api import WindowsAPI
 
 app = QApplication([])
 window = QWidget()

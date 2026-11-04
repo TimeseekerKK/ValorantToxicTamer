@@ -4,7 +4,8 @@ import threading
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 from PySide6.QtWidgets import QMessageBox
 
-from updater import download_release, installed_executable, latest_release, launch_installer
+from .updater import download_release, installed_executable, latest_release, launch_installer
+from .ui_theme import style_message_box
 
 
 class UpdateWorker(QThread):
@@ -40,6 +41,7 @@ class UpdateController(QObject):
             return
         self.busy = True
         self.window.update_button.setEnabled(False)
+        self.window.update_button.setText("检查中…")
         self.window.result_label.setText("正在检查更新…")
         self._start("check", latest_release)
 
@@ -52,6 +54,7 @@ class UpdateController(QObject):
     def _idle(self):
         self.busy = False
         self.window.update_button.setEnabled(True)
+        self.window.update_button.setText("检查更新")
 
     @Slot()
     def _finished(self):
@@ -71,7 +74,7 @@ class UpdateController(QObject):
             if release is None:
                 self._idle()
                 self.window.result_label.setText("当前已是最新版本。")
-                QMessageBox.information(self.window, "检查更新", "当前已是最新版本。")
+                self.window.information("检查更新", "当前已是最新版本。")
                 return
             dialog = QMessageBox(self.window)
             dialog.setWindowTitle("检查更新")
@@ -82,7 +85,10 @@ class UpdateController(QObject):
             dialog.button(QMessageBox.StandardButton.Yes).setText("是")
             dialog.button(QMessageBox.StandardButton.No).setText("否")
             dialog.setDefaultButton(QMessageBox.StandardButton.No)
-            if dialog.exec() != QMessageBox.StandardButton.Yes or self.closing:
+            style_message_box(dialog, QMessageBox.StandardButton.Yes)
+            answer = dialog.exec()
+            dialog.deleteLater()
+            if answer != QMessageBox.StandardButton.Yes or self.closing:
                 self._idle()
                 self.window.result_label.setText("已取消更新。")
                 return
@@ -93,6 +99,7 @@ class UpdateController(QObject):
                 self.window.error(exc)
                 return
             self.window.result_label.setText("正在下载更新，请稍候…")
+            self.window.update_button.setText("下载中…")
             self._start("download", lambda: download_release(release, self.target, self.cancel))
         elif self.stage == "download":
             staged = worker.result
@@ -103,6 +110,7 @@ class UpdateController(QObject):
                     staged.unlink(missing_ok=True)
                     raise
             self.window.result_label.setText("正在准备覆盖安装…")
+            self.window.update_button.setText("准备安装…")
             self._start("install", prepare)
         else:
             self.window.result_label.setText("更新已准备就绪，正在退出并覆盖安装…")

@@ -22,7 +22,7 @@ HOTKEYS = tuple(f"F{i}" for i in range(1, 12))  # F12 is reserved by Windows.
 def data_directory() -> Path:
     if getattr(sys, "frozen", False):
         return Path(os.environ["LOCALAPPDATA"]) / "ValorantToxicTamer" / "data"
-    return Path(__file__).resolve().parent / "data"
+    return Path(__file__).resolve().parents[1] / "data"
 
 
 def atomic_json(path: Path, value) -> None:
@@ -91,7 +91,7 @@ def set_autostart(enabled: bool):
             if not getattr(sys, "frozen", False):
                 windowless = executable.with_name("pythonw.exe")
                 args = [str(windowless if windowless.exists() else executable),
-                        str(Path(__file__).resolve().parent / "main.py")]
+                        str(Path(__file__).resolve().parents[1] / "main.py")]
             winreg.SetValueEx(key, "ValorantToxicTamer", 0, winreg.REG_SZ,
                              subprocess.list2cmdline(args))
         else:

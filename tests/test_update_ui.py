@@ -12,11 +12,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from config_manager import ConfigManager
-from message_manager import MessageManager
-from sender import Sender
-from ui import MainWindow
-from updater import Release
+from valorant_toxic_tamer.config_manager import ConfigManager
+from valorant_toxic_tamer.message_manager import MessageManager
+from valorant_toxic_tamer.sender import Sender
+from valorant_toxic_tamer.ui import MainWindow
+from valorant_toxic_tamer.updater import Release
 
 
 class UpdateUITests(unittest.TestCase):
@@ -58,9 +58,9 @@ class UpdateUITests(unittest.TestCase):
             self.assertEqual(dialog.defaultButton().text(), "否")
             self.assertEqual(dialog.button(QMessageBox.StandardButton.Yes).text(), "是")
             return QMessageBox.StandardButton.No
-        with patch("update_controller.latest_release", return_value=self.release), \
+        with patch("valorant_toxic_tamer.update_controller.latest_release", return_value=self.release), \
                 patch.object(QMessageBox, "exec", decline), \
-                patch("update_controller.download_release") as download:
+                patch("valorant_toxic_tamer.update_controller.download_release") as download:
             self.window.update_button.click()
             self.wait_until(lambda: not self.updater.busy)
             download.assert_not_called()
@@ -71,11 +71,11 @@ class UpdateUITests(unittest.TestCase):
         staged = self.directory / "staged.exe"
         staged.write_bytes(b"MZnew")
         target = self.directory / "installed.exe"
-        with patch("update_controller.latest_release", return_value=self.release), \
+        with patch("valorant_toxic_tamer.update_controller.latest_release", return_value=self.release), \
                 patch.object(QMessageBox, "exec", return_value=QMessageBox.StandardButton.Yes), \
-                patch("update_controller.installed_executable", return_value=target), \
-                patch("update_controller.download_release", return_value=staged) as download, \
-                patch("update_controller.launch_installer") as install:
+                patch("valorant_toxic_tamer.update_controller.installed_executable", return_value=target), \
+                patch("valorant_toxic_tamer.update_controller.download_release", return_value=staged) as download, \
+                patch("valorant_toxic_tamer.update_controller.launch_installer") as install:
             self.window.update_button.click()
             self.wait_until(lambda: self.ready.called)
             download.assert_called_once_with(self.release, target, self.updater.cancel)
@@ -83,12 +83,12 @@ class UpdateUITests(unittest.TestCase):
         self.ready.assert_called_once()
 
     def test_latest_version_and_check_failure_restore_button(self):
-        with patch("update_controller.latest_release", return_value=None), \
-                patch.object(QMessageBox, "information") as info:
+        with patch("valorant_toxic_tamer.update_controller.latest_release", return_value=None), \
+                patch.object(self.window, "information") as info:
             self.window.update_button.click()
             self.wait_until(lambda: not self.updater.busy)
             info.assert_called_once()
-        with patch("update_controller.latest_release", side_effect=OSError("offline")):
+        with patch("valorant_toxic_tamer.update_controller.latest_release", side_effect=OSError("offline")):
             self.window.update_button.click()
             self.wait_until(lambda: not self.updater.busy)
             self.window.error.assert_called_once_with("offline")
@@ -100,12 +100,12 @@ class UpdateUITests(unittest.TestCase):
             staged = self.directory / "staged.exe"
             staged.write_bytes(b"MZnew")
             self.window.error.reset_mock()
-            with patch("update_controller.latest_release", return_value=self.release), \
+            with patch("valorant_toxic_tamer.update_controller.latest_release", return_value=self.release), \
                     patch.object(QMessageBox, "exec", return_value=QMessageBox.StandardButton.Yes), \
-                    patch("update_controller.installed_executable", return_value=self.directory / "installed.exe"), \
-                    patch("update_controller.download_release", side_effect=OSError("failed") if stage == "download" else None,
+                    patch("valorant_toxic_tamer.update_controller.installed_executable", return_value=self.directory / "installed.exe"), \
+                    patch("valorant_toxic_tamer.update_controller.download_release", side_effect=OSError("failed") if stage == "download" else None,
                           return_value=staged), \
-                    patch("update_controller.launch_installer", side_effect=OSError("failed")) as install:
+                    patch("valorant_toxic_tamer.update_controller.launch_installer", side_effect=OSError("failed")) as install:
                 self.window.update_button.click()
                 self.wait_until(lambda: not self.updater.busy)
                 self.window.error.assert_called_once_with("failed")
@@ -121,8 +121,8 @@ class UpdateUITests(unittest.TestCase):
         def lookup():
             unblock.wait(3)
             return None
-        with patch("update_controller.latest_release", side_effect=lookup) as lookup_mock, \
-                patch.object(QMessageBox, "information"):
+        with patch("valorant_toxic_tamer.update_controller.latest_release", side_effect=lookup) as lookup_mock, \
+                patch.object(self.window, "information"):
             self.window.update_button.click()
             QTest.qWait(50)
             self.assertFalse(self.window.update_button.isEnabled())
