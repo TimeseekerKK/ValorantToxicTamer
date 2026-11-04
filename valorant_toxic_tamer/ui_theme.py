@@ -6,6 +6,8 @@ from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTabBar, QVBoxLayout, QWidget)
 
+from .tray import MENU_STYLE
+
 
 RED = "#ff4655"
 TEXT = "#edf2f6"
@@ -31,17 +33,13 @@ QCheckBox::indicator { width: 18px; height: 18px; }
 QCheckBox:focus { outline: 1px solid #96a4b2; }
 QPushButton { background: #23313f; border: 1px solid #4a5d6e; padding: 9px 18px; min-height: 22px; }
 QPushButton:hover { background: #304353; }
-QMenu { background: #17222e; border: 1px solid #415263; padding: 5px; }
-QMenu::item { padding: 9px 24px; }
-QMenu::item:selected { background: #303e4e; border-left: 2px solid #ff4655; }
-QMenu::separator { height: 1px; background: #344454; margin: 5px 8px; }
 QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; border: 0; }
 QScrollBar:vertical { background: #121c26; width: 7px; margin: 2px 0; }
 QScrollBar::handle:vertical { background: #435364; min-height: 28px; border-radius: 3px; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
 QToolTip { background: #202d3b; color: #edf2f6; border: 1px solid #526275; padding: 6px; }
-"""
+""" + MENU_STYLE
 
 
 def style_for_font_size(font_size):

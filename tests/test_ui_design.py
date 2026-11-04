@@ -31,6 +31,8 @@ class DesignUITests(unittest.TestCase):
         self.config = ConfigManager(root / "config.json")
         self.sender = Sender(self.messages, Mock())
         self.window = MainWindow(self.messages, self.config, self.sender, self.config.save)
+        self.window.tabs.setCurrentIndex(1)
+        self.window.tabs.setCurrentIndex(0)
         self.window.error = Mock()
         self.window.show()
         self.app.processEvents()
@@ -244,6 +246,7 @@ class DesignUITests(unittest.TestCase):
                 dialog.deleteLater()
         restarted = MainWindow(self.messages, ConfigManager(self.config.path), self.sender, self.config.save)
         try:
+            restarted.tabs.setCurrentIndex(1)
             restarted.ensurePolished()
             self.assertEqual(restarted.font_size.currentData(), 16)
             self.assertEqual(restarted.list_widget.font().pixelSize(), 16)

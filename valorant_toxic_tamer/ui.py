@@ -11,7 +11,7 @@ from .config_manager import DEFAULT_CONFIG, FONT_SIZES, HOTKEYS
 from .app_version import VERSION
 from .tray import app_icon
 from .update_controller import UpdateController
-from .updater import UPDATE_CHANNELS
+from .update_settings import UPDATE_CHANNELS
 from .ui_theme import (MUTED, RED, TEXT, CutButton, CutComboBox, CutLineEdit,
                       CutTabBar, MessageDialog, Panel, TacticalCheckBox, style_for_font_size,
                       style_message_box, UpdateButton)
@@ -130,6 +130,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.messages, self.config, self.sender = messages, config, sender
         self.save_settings = save_settings
+        self.settings_loaded = False
+        self.updater = UpdateController(self)
         self.setWindowTitle(f"ValorantToxicTamer · V{VERSION}")
         self.setWindowIcon(app_icon())
         self.resize(840, 638)
@@ -157,20 +159,40 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.tabs, 1)
         self.edit_buttons = []
         self.tabs.addTab(self.build_management(), "消息管理")
-        self.tabs.addTab(self.build_settings(), "设置")
+        self.settings_placeholder = QWidget()
+        self.tabs.addTab(self.settings_placeholder, "设置")
+        self.tabs.currentChanged.connect(self._page_changed)
         layout.addWidget(separator())
         self.result_label = label("就绪 · 请添加消息，然后在游戏前台使用快捷键。", wrap=True)
         layout.addWidget(self.result_label)
         layout.addWidget(label("发送前请关闭游戏聊天框，并松开修饰键。程序无法确认聊天框状态或服务器送达。",
                                "muted", True))
-        self.load_settings()
+        self.timer = QTimer(self)
+        self.timer.setInterval(100)
+        self.timer.timeout.connect(self.refresh_status)
         self.reload_messages()
         self.apply_font_size()
         if self.messages.messages:
             self.result_label.setText("就绪 · 在游戏前台使用快捷键，按顺序输入下一条消息。")
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.refresh_status)
-        self.timer.start(100)
+
+    def _page_changed(self, page):
+        if page == 1:
+            self.ensure_settings()
+
+    def ensure_settings(self):
+        if self.settings_loaded:
+            return
+        settings = self.build_settings()
+        current = self.tabs.currentIndex()
+        self.tabs.blockSignals(True)
+        self.tabs.removeTab(1)
+        self.tabs.insertTab(1, settings, "设置")
+        self.tabs.setCurrentIndex(current)
+        self.tabs.blockSignals(False)
+        self.settings_placeholder.deleteLater()
+        self.settings_loaded = True
+        self.load_settings()
+        self.update_actions()
 
     def button(self, text, action, *, primary=False, icon=None):
         button = CutButton(text, primary=primary)
@@ -367,7 +389,7 @@ class MainWindow(QMainWindow):
         about.addWidget(self.update_channel_hint)
         self.update_button = UpdateButton()
         self.update_button.clicked.connect(lambda: self.updater.check())
-        self.updater = UpdateController(self)
+        self.updater.bind_widgets()
         about.addWidget(self.update_button)
         about.addWidget(separator())
         about.addWidget(label("本地数据", "section"))
@@ -449,8 +471,6 @@ class MainWindow(QMainWindow):
         self.all_hint.setText(self.config.value["all_hotkey"])
 
     def update_actions(self, *_):
-        if not hasattr(self, "save_button"):
-            return
         row = self.list_widget.currentRow()
         count = self.list_widget.count()
         with self.sender.lock:
@@ -463,13 +483,15 @@ class MainWindow(QMainWindow):
         self.up_button.setEnabled(idle and row > 0)
         self.down_button.setEnabled(idle and 0 <= row < count - 1)
         self.export_button.setEnabled(idle and count > 0)
-        self.save_button.setEnabled(idle)
+        if self.settings_loaded:
+            self.save_button.setEnabled(idle)
 
     def refresh_status(self):
         with self.sender.lock:
             count, index = len(self.messages.messages), self.messages.index
             remaining = max(0, self.sender.ready_at - self.sender.clock())
-            state = ("正在输入" if self.sender.busy else f"冷却 {remaining:.1f}s" if remaining
+            busy = self.sender.busy
+            state = ("正在输入" if busy else f"冷却 {remaining:.1f}s" if remaining
                      else "就绪" if count else "等待添加消息")
             current = self.messages.current or "暂无消息"
         position = index + 1 if count else 0
@@ -486,9 +508,16 @@ class MainWindow(QMainWindow):
             self.list_widget.viewport().update()
         self.update_actions()
 
+        if self.isVisible() and (busy or remaining > 0):
+            if not self.timer.isActive():
+                self.timer.start()
+        else:
+            self.timer.stop()
+
     def report(self, message):
         self.result_label.setText(message)
-        self.refresh_status()
+        if self.isVisible():
+            self.refresh_status()
 
     def reload_messages(self, row=0):
         self.list_widget.clear()
@@ -619,3 +648,11 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         self.hide()
         event.ignore()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.refresh_status()
+
+    def hideEvent(self, event):
+        self.timer.stop()
+        super().hideEvent(event)

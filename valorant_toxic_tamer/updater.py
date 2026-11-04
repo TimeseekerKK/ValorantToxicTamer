@@ -19,12 +19,12 @@ from urllib.request import Request, urlopen
 import truststore
 
 from .app_version import VERSION
+from .update_settings import UPDATE_CHANNELS
 
 
 REPOSITORY = "TimeseekerKK/ValorantToxicTamer"
 LATEST_URL = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
 RELEASES_URL = f"https://api.github.com/repos/{REPOSITORY}/releases"
-UPDATE_CHANNELS = {"stable": "正式版 Release", "beta": "测试版 Beta"}
 EXE_NAME = "ValorantToxicTamer.exe"
 
 

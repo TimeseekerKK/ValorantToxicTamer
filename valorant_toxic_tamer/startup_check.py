@@ -1,7 +1,9 @@
 """Exercise the shipped EXE with temporary data and no keyboard input."""
 import json
+from ctypes import wintypes as W
 from pathlib import Path
 import tempfile
+import sys
 
 from PySide6.QtCore import QTimer, qVersion
 from PySide6.QtWidgets import QSystemTrayIcon
@@ -21,22 +23,37 @@ def run(app, report_path):
         result["empty_messages"] = controller.messages.messages == []
         result["hotkeys"] = controller.hotkeys.status.copy()
         result["hotkeys_registered"] = len(controller.hotkeys.registered) == 2
-        result["starts_hidden"] = not controller.window.isVisible()
-        result["update_button_available"] = controller.window.update_button.isEnabled()
+        result["starts_hidden"] = controller.window is None
+        result["ui_not_loaded_at_startup"] = "valorant_toxic_tamer.ui" not in sys.modules
+        result["updater_not_loaded_at_startup"] = "valorant_toxic_tamer.updater" not in sys.modules
         result["update_helper_bundled"] = Path(__file__).with_name("update_install.ps1").exists()
+        received = []
+        controller.hotkeys.callback = received.append
+        post = controller.api.user.PostMessageW
+        post.argtypes = [W.HWND, W.UINT, W.WPARAM, W.LPARAM]
+        post.restype = W.BOOL
+
+        def post_hotkeys():
+            result["hotkeys_posted"] = all(post(controller.hotkeys.hwnd, 0x0312, identifier, 0)
+                                            for identifier in controller.hotkeys.IDS)
 
         def show_settings():
+            result["hotkeys_delivered_without_window"] = received == ["team", "all"] and controller.window is None
             controller.tray.menu.actions()[2].trigger()
 
         def finish():
             result["settings_opened"] = controller.window.isVisible() and controller.window.tabs.currentIndex() == 1
+            result["update_button_available"] = controller.window.update_button.isEnabled()
+            result["updater_not_loaded_after_settings"] = "valorant_toxic_tamer.updater" not in sys.modules
             controller.window.close()
             result["close_hides"] = not controller.window.isVisible()
+            result["hidden_timer_stopped"] = not controller.window.timer.isActive()
             result["tray_visible"] = controller.tray.isVisible()
             controller.tray.menu.actions()[-1].trigger()
 
-        QTimer.singleShot(150, show_settings)
-        QTimer.singleShot(450, finish)
+        QTimer.singleShot(50, post_hotkeys)
+        QTimer.singleShot(200, show_settings)
+        QTimer.singleShot(600, finish)
         app.exec()
         result["hotkeys_released"] = controller.hotkeys.registered == {}
         result["sender_stopped"] = controller.sender.cancel.is_set()
