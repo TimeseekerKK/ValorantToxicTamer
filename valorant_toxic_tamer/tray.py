@@ -1,6 +1,5 @@
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QPolygon
 from PySide6.QtCore import QPoint
-from .ui_theme import STYLE
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
 
@@ -22,7 +21,6 @@ class Tray(QSystemTrayIcon):
         super().__init__(app_icon(), window)
         self.setToolTip("ValorantToxicTamer")
         self.menu = QMenu(window)
-        self.menu.setStyleSheet(STYLE)
         for title, page in (("显示主窗口", 0), ("消息管理", 0), ("设置", 1), ("运行状态", 0)):
             action = self.menu.addAction(title)
             action.triggered.connect(lambda checked=False, p=page: window.reveal(p))

@@ -1,4 +1,6 @@
 """Shared, dependency-free Qt widget styling for the desktop UI."""
+import re
+
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit,
@@ -40,6 +42,10 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
 QToolTip { background: #202d3b; color: #edf2f6; border: 1px solid #526275; padding: 6px; }
 """
+
+
+def style_for_font_size(font_size):
+    return re.sub(r"(\d+)pt", lambda match: f"{int(match[1]) + font_size - 11}pt", STYLE)
 
 
 def cut_path(rect, cut=8):
@@ -99,7 +105,7 @@ class CutButton(QPushButton):
 
     def sizeHint(self):
         return QSize(self.fontMetrics().horizontalAdvance(self.text()) +
-                     (60 if not self.icon().isNull() else 38), 42)
+                     (60 if not self.icon().isNull() else 38), max(42, self.fontMetrics().height() + 20))
 
     def paintEvent(self, event):
         paint_button(self)
@@ -132,7 +138,8 @@ class _ButtonSkin(QObject):
 
 
 def style_message_box(dialog, primary=None):
-    dialog.setStyleSheet(STYLE)
+    parent = dialog.parentWidget()
+    dialog.setStyleSheet(parent.styleSheet() if parent else STYLE)
     dialog.setMinimumWidth(420)
     dialog.setTextFormat(Qt.TextFormat.PlainText)
     for button in dialog.buttons():
@@ -156,8 +163,9 @@ class Panel(QWidget):
 
 
 class CutComboBox(QComboBox):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, wheel_changes=True):
         super().__init__(parent)
+        self.wheel_changes = wheel_changes
         self.opened = False
         self.setMinimumHeight(42)
         self.setMinimumWidth(130)
@@ -166,11 +174,17 @@ class CutComboBox(QComboBox):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.view().setStyleSheet("""
             QListView { background: #17222e; color: #edf2f6; border: 1px solid #506173;
-                        outline: 0; padding: 3px; font: 10pt 'Microsoft YaHei UI'; }
+                        outline: 0; padding: 3px; }
             QListView::item { min-height: 34px; padding-left: 14px; border-left: 3px solid transparent; }
             QListView::item:hover { background: #2b3b4b; }
             QListView::item:selected { background: #472a36; border-left: 3px solid #ff4655; }
         """)
+
+    def wheelEvent(self, event):
+        if self.wheel_changes:
+            super().wheelEvent(event)
+        else:
+            event.ignore()
 
     def showPopup(self):
         self.opened = True
@@ -229,7 +243,8 @@ class CutLineEdit(QLineEdit):
 
 class CutTabBar(QTabBar):
     def tabSizeHint(self, index):
-        return QSize(150, 48)
+        return QSize(max(150, self.fontMetrics().horizontalAdvance(self.tabText(index)) + 44),
+                     max(48, self.fontMetrics().height() + 20))
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -256,7 +271,7 @@ class MessageDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setWindowIcon(parent.windowIcon())
-        self.setStyleSheet(STYLE)
+        self.setStyleSheet(parent.styleSheet())
         self.setMinimumWidth(500)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(26, 22, 26, 22)

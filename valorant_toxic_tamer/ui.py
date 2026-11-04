@@ -1,18 +1,19 @@
 from pathlib import Path
 
 from PySide6.QtCore import QRect, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPen
 from PySide6.QtWidgets import (QDialog, QFileDialog, QFormLayout,
     QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMainWindow,
     QMessageBox, QScrollArea, QSizePolicy, QStackedWidget, QStyle,
     QStyledItemDelegate, QTabWidget, QVBoxLayout, QWidget)
 
-from .config_manager import HOTKEYS
+from .config_manager import FONT_SIZES, HOTKEYS
 from .app_version import VERSION
 from .tray import app_icon
 from .update_controller import UpdateController
-from .ui_theme import (MUTED, RED, STYLE, TEXT, CutButton, CutComboBox, CutLineEdit,
-                      CutTabBar, MessageDialog, Panel, TacticalCheckBox, style_message_box)
+from .ui_theme import (MUTED, RED, TEXT, CutButton, CutComboBox, CutLineEdit,
+                      CutTabBar, MessageDialog, Panel, TacticalCheckBox, style_for_font_size,
+                      style_message_box)
 
 
 def label(text, name=None, wrap=False):
@@ -36,17 +37,29 @@ class MessageDelegate(QStyledItemDelegate):
         super().__init__(window.list_widget)
         self.window = window
 
+    def column_widths(self):
+        metrics = self.window.list_widget.fontMetrics()
+        digits = max(2, len(str(self.window.list_widget.count())))
+        number = max(36, max(metrics.horizontalAdvance(str(i) * digits) for i in range(10)))
+        upcoming_font = QFont(self.window.list_widget.font())
+        upcoming_font.setPointSizeF(max(8, upcoming_font.pointSizeF() - 1))
+        upcoming = max(60, QFontMetrics(upcoming_font).horizontalAdvance("下一条"))
+        return number, upcoming
+
     def sizeHint(self, option, index):
-        width = max(180, self.window.list_widget.viewport().width() - 136)
+        number, upcoming = self.column_widths()
+        reserved = number + upcoming + 40
+        width = max(1, self.window.list_widget.viewport().width() - reserved)
         text = index.data(Qt.ItemDataRole.UserRole) or ""
         rect = self.window.list_widget.fontMetrics().boundingRect(
             QRect(0, 0, width, 100000), Qt.TextFlag.TextWordWrap, text)
-        return QSize(width + 136, max(62, rect.height() + 30))
+        return QSize(width + reserved, max(62, rect.height() + 30))
 
     def paint(self, painter, option, index):
         painter.save()
         painter.setClipRect(option.rect)
         rect = option.rect
+        number_width, upcoming_width = self.column_widths()
         upcoming = index.row() == self.window.next_index
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         if selected:
@@ -61,11 +74,11 @@ class MessageDelegate(QStyledItemDelegate):
         painter.drawLine(rect.bottomLeft(), rect.bottomRight())
         painter.setFont(option.font)
         painter.setPen(QColor(MUTED))
-        painter.drawText(QRect(rect.left() + 16, rect.top(), 36, rect.height()),
+        painter.drawText(QRect(rect.left() + 16, rect.top(), number_width, rect.height()),
                          Qt.AlignmentFlag.AlignVCenter, f"{index.row() + 1:02d}")
         painter.setPen(QColor(TEXT))
-        painter.drawText(QRect(rect.left() + 60, rect.top() + 14,
-                               rect.width() - 136, rect.height() - 28),
+        painter.drawText(QRect(rect.left() + number_width + 24, rect.top() + 14,
+                               rect.width() - number_width - upcoming_width - 40, rect.height() - 28),
                          Qt.TextFlag.TextWordWrap | Qt.AlignmentFlag.AlignVCenter,
                          index.data(Qt.ItemDataRole.UserRole) or "")
         if upcoming:
@@ -73,7 +86,7 @@ class MessageDelegate(QStyledItemDelegate):
             font.setPointSizeF(max(8, font.pointSizeF() - 1))
             painter.setFont(font)
             painter.setPen(QColor("#ff8290"))
-            painter.drawText(QRect(rect.right() - 66, rect.top(), 60, rect.height()),
+            painter.drawText(QRect(rect.right() - upcoming_width - 6, rect.top(), upcoming_width, rect.height()),
                              Qt.AlignmentFlag.AlignCenter, "下一条")
         if option.state & QStyle.StateFlag.State_HasFocus:
             painter.setPen(QPen(QColor("#6c8296"), 1, Qt.PenStyle.DashLine))
@@ -87,6 +100,30 @@ class MessageList(QListWidget):
         self.doItemsLayout()
 
 
+class WrappingLabel(QLabel):
+    """Grow inside the scroll area instead of clipping wrapped text."""
+    def __init__(self, text="", *, minimum_lines=1):
+        super().__init__(text)
+        self.minimum_lines = minimum_lines
+        self.setWordWrap(True)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+    def update_height(self):
+        # QLabel.heightForWidth() includes the old minimum; allow shorter text to shrink.
+        self.setMinimumHeight(0)
+        self.setMinimumHeight(max(self.fontMetrics().lineSpacing() * self.minimum_lines,
+                                  self.heightForWidth(max(1, self.width()))))
+
+    def setText(self, text):
+        if text != self.text():
+            super().setText(text)
+            self.update_height()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update_height()
+
+
 class MainWindow(QMainWindow):
     def __init__(self, messages, config, sender, save_settings):
         super().__init__()
@@ -96,7 +133,7 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(app_icon())
         self.resize(1120, 850)
         self.setMinimumSize(860, 680)
-        self.setStyleSheet(STYLE)
+        self.setStyleSheet(style_for_font_size(config.value["font_size"]))
         self.next_index = -1
         root = QWidget()
         self.setCentralWidget(root)
@@ -127,6 +164,7 @@ class MainWindow(QMainWindow):
                                "muted", True))
         self.load_settings()
         self.reload_messages()
+        self.apply_font_size()
         if self.messages.messages:
             self.result_label.setText("就绪 · 在游戏前台使用快捷键，按顺序输入下一条消息。")
         self.timer = QTimer(self)
@@ -152,28 +190,33 @@ class MainWindow(QMainWindow):
         card.setContentsMargins(22, 24, 22, 22)
         card.setSpacing(18)
         card.addWidget(label("下一条", "section"))
-        self.progress_label = QLabel()
+        self.progress_label = WrappingLabel()
         self.progress_label.setObjectName("progress")
         card.addWidget(self.progress_label)
         card.addWidget(separator())
-        self.next_label = label("暂无消息", "preview", True)
-        self.next_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self.next_label.setMaximumHeight(225)
+        self.next_label = WrappingLabel("暂无消息", minimum_lines=3)
+        self.next_label.setObjectName("preview")
+        self.next_label.setTextFormat(Qt.TextFormat.PlainText)
         card.addWidget(self.next_label)
         card.addStretch()
         self.state_label = label("等待添加消息", "ready", True)
         card.addWidget(self.state_label)
-        keys = QHBoxLayout()
+        keys = QFormLayout()
         self.team_hint = label("F8", "keycap")
         self.all_hint = label("F9", "keycap")
-        for item in (self.team_hint, label("队伍"), self.all_hint, label("全体")):
-            keys.addWidget(item)
-        keys.addStretch()
+        keys.addRow("队伍", self.team_hint)
+        keys.addRow("全体", self.all_hint)
         card.addLayout(keys)
         self.keys_label = label("快捷键注册中…", "muted", True)
         card.addWidget(self.keys_label)
         card.addWidget(label("单一列表 · 顺序循环", "muted"))
-        columns.addWidget(preview, 3)
+        self.preview_scroll = QScrollArea()
+        self.preview_scroll.setWidgetResizable(True)
+        self.preview_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.preview_scroll.setMinimumWidth(240)
+        self.preview_scroll.setMaximumWidth(350)
+        self.preview_scroll.setWidget(preview)
+        columns.addWidget(self.preview_scroll, 3)
 
         workspace = Panel()
         manage_layout = QVBoxLayout(workspace)
@@ -271,6 +314,19 @@ class MainWindow(QMainWindow):
         controls.addWidget(label("范围 0.2–2 秒，队伍与全体共用。", "muted", True))
         controls.addWidget(label("两个频道需使用不同快捷键。", "muted", True))
         controls.addWidget(separator())
+        controls.addWidget(label("界面显示", "section"))
+        self.font_size = CutComboBox(wheel_changes=False)
+        self.font_size.setAccessibleName("字体大小")
+        for size in FONT_SIZES:
+            self.font_size.addItem(f"{size} pt" + ("（默认）" if size == 11 else ""), size)
+        font_form = QFormLayout()
+        font_form.setHorizontalSpacing(22)
+        font_caption = label("字体大小")
+        font_caption.setBuddy(self.font_size)
+        font_form.addRow(font_caption, self.font_size)
+        controls.addLayout(font_form)
+        controls.addWidget(label("保存后调整界面字号，下次启动保留。", "muted", True))
+        controls.addWidget(separator())
         controls.addWidget(label("启动与后台", "section"))
         self.start_hidden = TacticalCheckBox("启动后隐藏到系统托盘")
         self.autostart = TacticalCheckBox("随 Windows 登录自动启动")
@@ -315,7 +371,7 @@ class MainWindow(QMainWindow):
         self.save_button.setMinimumWidth(180)
         footer.addWidget(self.save_button)
         outer.addLayout(footer)
-        for control in (self.team_key, self.all_key):
+        for control in (self.team_key, self.all_key, self.font_size):
             control.currentIndexChanged.connect(self.settings_changed)
         self.cooldown.textChanged.connect(self.settings_changed)
         self.start_hidden.toggled.connect(self.settings_changed)
@@ -329,7 +385,14 @@ class MainWindow(QMainWindow):
         self.cooldown.setText(str(value["cooldown"]))
         self.start_hidden.setChecked(value["start_hidden"])
         self.autostart.setChecked(value["autostart"])
+        self.font_size.setCurrentIndex(self.font_size.findData(value["font_size"]))
         self.settings_changed()
+
+    def apply_font_size(self):
+        self.setStyleSheet(style_for_font_size(self.config.value["font_size"]))
+        self.next_label.update_height()
+        self.progress_label.update_height()
+        self.list_widget.doItemsLayout()
 
     def settings_changed(self, *_):
         value = self.config.value
@@ -340,6 +403,7 @@ class MainWindow(QMainWindow):
         changed = (self.team_key.currentText() != value["team_hotkey"] or
                    self.all_key.currentText() != value["all_hotkey"] or
                    cooldown != value["cooldown"] or
+                   self.font_size.currentData() != value["font_size"] or
                    self.start_hidden.isChecked() != value["start_hidden"] or
                    self.autostart.isChecked() != value["autostart"])
         self.settings_hint.setText("有未保存的修改 · 点击「保存设置」生效" if changed
@@ -353,8 +417,10 @@ class MainWindow(QMainWindow):
                 raise ValueError("请输入有效的冷却时间（0.2–2 秒）。") from None
             value = dict(team_hotkey=self.team_key.currentText(), all_hotkey=self.all_key.currentText(),
                          cooldown=cooldown, start_hidden=self.start_hidden.isChecked(),
-                         autostart=self.autostart.isChecked())
+                         autostart=self.autostart.isChecked(), font_size=self.font_size.currentData())
             self.sender.edit(lambda: self.save_settings(value))
+            self.refresh_status()
+            self.apply_font_size()
             self.result_label.setText("设置已保存。")
             self.settings_changed()
         except (OSError, ValueError) as exc:
@@ -392,11 +458,11 @@ class MainWindow(QMainWindow):
         position = index + 1 if count else 0
         self.state_label.setText(f"● {state}  |  {position} / {count}")
         self.progress_label.setText(f'<span style="color:{RED}">{position:02d}</span>'
-                                    f' <span style="font-size:20pt">/ {count:02d}</span>')
-        preview = current[:200] + "…" if len(current) > 200 else current
-        if self.next_label.text() != preview:
-            self.next_label.setText(preview)
+                                    f' <span style="font-size:{self.config.value["font_size"] + 9}pt">/ {count:02d}</span>')
+        if self.next_label.text() != current:
+            self.next_label.setText(current)
             self.next_label.setToolTip(current)
+            self.preview_scroll.verticalScrollBar().setValue(0)
         next_index = index if count else -1
         if self.next_index != next_index:
             self.next_index = next_index
