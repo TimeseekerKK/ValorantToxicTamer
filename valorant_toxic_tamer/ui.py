@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QDialog, QFileDialog, QFormLayout,
     QMessageBox, QScrollArea, QSizePolicy, QStackedWidget, QStyle,
     QStyledItemDelegate, QTabWidget, QVBoxLayout, QWidget)
 
-from .config_manager import FONT_SIZES, HOTKEYS
+from .config_manager import DEFAULT_CONFIG, FONT_SIZES, HOTKEYS
 from .app_version import VERSION
 from .tray import app_icon
 from .update_controller import UpdateController
@@ -43,7 +43,7 @@ class MessageDelegate(QStyledItemDelegate):
         digits = max(2, len(str(self.window.list_widget.count())))
         number = max(36, max(metrics.horizontalAdvance(str(i) * digits) for i in range(10)))
         upcoming_font = QFont(self.window.list_widget.font())
-        upcoming_font.setPointSizeF(max(8, upcoming_font.pointSizeF() - 1))
+        upcoming_font.setPixelSize(max(8, upcoming_font.pixelSize() - 1))
         upcoming = max(60, QFontMetrics(upcoming_font).horizontalAdvance("下一条"))
         return number, upcoming
 
@@ -84,7 +84,7 @@ class MessageDelegate(QStyledItemDelegate):
                          index.data(Qt.ItemDataRole.UserRole) or "")
         if upcoming:
             font = QFont(option.font)
-            font.setPointSizeF(max(8, font.pointSizeF() - 1))
+            font.setPixelSize(max(8, font.pixelSize() - 1))
             painter.setFont(font)
             painter.setPen(QColor("#ff8290"))
             painter.drawText(QRect(rect.right() - upcoming_width - 6, rect.top(), upcoming_width, rect.height()),
@@ -132,8 +132,8 @@ class MainWindow(QMainWindow):
         self.save_settings = save_settings
         self.setWindowTitle(f"ValorantToxicTamer · V{VERSION}")
         self.setWindowIcon(app_icon())
-        self.resize(1120, 850)
-        self.setMinimumSize(860, 680)
+        self.resize(840, 638)
+        self.setMinimumSize(840, 638)
         self.setStyleSheet(style_for_font_size(config.value["font_size"]))
         self.next_index = -1
         root = QWidget()
@@ -320,7 +320,7 @@ class MainWindow(QMainWindow):
         self.font_size = CutComboBox(wheel_changes=False)
         self.font_size.setAccessibleName("字体大小")
         for size in FONT_SIZES:
-            self.font_size.addItem(f"{size} pt" + ("（默认）" if size == 11 else ""), size)
+            self.font_size.addItem(f"{size} px" + ("（默认）" if size == DEFAULT_CONFIG["font_size"] else ""), size)
         font_form = QFormLayout()
         font_form.setHorizontalSpacing(22)
         font_caption = label("字体大小")
@@ -475,7 +475,7 @@ class MainWindow(QMainWindow):
         position = index + 1 if count else 0
         self.state_label.setText(f"● {state}  |  {position} / {count}")
         self.progress_label.setText(f'<span style="color:{RED}">{position:02d}</span>'
-                                    f' <span style="font-size:{self.config.value["font_size"] + 9}pt">/ {count:02d}</span>')
+                                    f' <span style="font-size:{self.config.value["font_size"] + 9}px">/ {count:02d}</span>')
         if self.next_label.text() != current:
             self.next_label.setText(current)
             self.next_label.setToolTip(current)

@@ -11,14 +11,14 @@ RED = "#ff4655"
 TEXT = "#edf2f6"
 MUTED = "#96a4b2"
 STYLE = """
-QWidget { color: #edf2f6; font: 11pt 'Microsoft YaHei UI'; }
+QWidget { color: #edf2f6; font: 10px 'Microsoft YaHei UI'; }
 QMainWindow, QDialog, QMessageBox { background: #0c141d; }
 QLabel { background: transparent; }
-QLabel#brand { font-size: 19pt; font-weight: 700; }
-QLabel#section { font-size: 14pt; font-weight: 700; border-left: 3px solid #ff4655; padding-left: 12px; }
+QLabel#brand { font-size: 18px; font-weight: 700; }
+QLabel#section { font-size: 13px; font-weight: 700; border-left: 3px solid #ff4655; padding-left: 12px; }
 QLabel#muted { color: #96a4b2; }
-QLabel#preview { font-size: 19pt; font-weight: 600; }
-QLabel#progress { font-size: 28pt; font-weight: 700; }
+QLabel#preview { font-size: 18px; font-weight: 600; }
+QLabel#progress { font-size: 27px; font-weight: 700; }
 QLabel#ready { color: #68ded2; font-weight: 600; }
 QLabel#keycap { border: 1px solid #536171; padding: 6px 12px; font-weight: 600; }
 QFrame#separator { background: #2b3947; border: 0; max-height: 1px; }
@@ -45,7 +45,8 @@ QToolTip { background: #202d3b; color: #edf2f6; border: 1px solid #526275; paddi
 
 
 def style_for_font_size(font_size):
-    return re.sub(r"(\d+)pt", lambda match: f"{int(match[1]) + font_size - 11}pt", STYLE)
+    return re.sub(r"(font(?:-size)?:\s*)(\d+)px",
+                  lambda match: f"{match[1]}{int(match[2]) + font_size - 10}px", STYLE)
 
 
 def cut_path(rect, cut=8):

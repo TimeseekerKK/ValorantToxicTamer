@@ -203,7 +203,7 @@ class DesignUITests(unittest.TestCase):
         self.assertEqual(self.messages.path.read_bytes(), before)
 
     def test_minimum_size_keeps_primary_controls_inside_workspaces(self):
-        self.window.resize(860, 680)
+        self.window.resize(840, 638)
         self.messages.replace(["很长的消息" * 100])
         self.window.reload_messages()
         self.app.processEvents()
@@ -226,34 +226,34 @@ class DesignUITests(unittest.TestCase):
         QTest.keyClick(self.window.font_size, Qt.Key.Key_End)
         self.assertEqual(self.window.font_size.currentData(), 16)
         self.assertIn("未保存", self.window.settings_hint.text())
-        self.assertEqual(self.window.list_widget.font().pointSize(), 11)
+        self.assertEqual(self.window.list_widget.font().pixelSize(), 10)
         QTest.mouseClick(self.window.save_button, Qt.MouseButton.LeftButton)
         self.app.processEvents()
         self.assertEqual(self.config.value["font_size"], 16)
         self.assertEqual(ConfigManager(self.config.path).value["font_size"], 16)
-        self.assertEqual(self.window.list_widget.font().pointSize(), 16)
+        self.assertEqual(self.window.list_widget.font().pixelSize(), 16)
         self.assertGreater(self.window.list_widget.sizeHintForRow(0), old_height)
-        self.assertEqual(self.window.next_label.font().pointSize(), 24)
+        self.assertEqual(self.window.next_label.font().pixelSize(), 24)
         for dialog in (MessageDialog(self.window, "添加消息"), QMessageBox(self.window)):
             try:
                 if isinstance(dialog, QMessageBox):
                     style_message_box(dialog)
                 dialog.ensurePolished()
-                self.assertEqual(dialog.font().pointSize(), 16)
+                self.assertEqual(dialog.font().pixelSize(), 16)
             finally:
                 dialog.deleteLater()
         restarted = MainWindow(self.messages, ConfigManager(self.config.path), self.sender, self.config.save)
         try:
             restarted.ensurePolished()
             self.assertEqual(restarted.font_size.currentData(), 16)
-            self.assertEqual(restarted.list_widget.font().pointSize(), 16)
+            self.assertEqual(restarted.list_widget.font().pixelSize(), 16)
         finally:
             restarted.timer.stop()
             restarted.updater.shutdown()
             restarted.deleteLater()
 
     def test_wheel_over_font_size_scrolls_settings_without_changing_selection(self):
-        self.window.resize(860, 680)
+        self.window.resize(840, 638)
         self.window.tabs.setCurrentIndex(1)
         box = self.window.font_size
         scroll = self.window.tabs.currentWidget().findChild(QScrollArea)
@@ -269,7 +269,7 @@ class DesignUITests(unittest.TestCase):
                     old_scroll = scroll.verticalScrollBar().value()
                     QTest.wheelEvent(self.window.windowHandle(), position, QPoint(0, delta))
                     self.app.processEvents()
-                    self.assertEqual(box.currentData(), 11)
+                    self.assertEqual(box.currentData(), 10)
                     self.assertNotIn("未保存", self.window.settings_hint.text())
                     self.assertEqual(self.config.path.read_bytes(), before)
                     if delta < 0:
@@ -304,11 +304,11 @@ class DesignUITests(unittest.TestCase):
             self.window.apply_settings()
         self.window.error.assert_called_once()
         self.assertEqual(self.config.path.read_bytes(), before)
-        self.assertEqual(self.window.font_size.currentData(), 11)
-        self.assertEqual(self.window.list_widget.font().pointSize(), 11)
+        self.assertEqual(self.window.font_size.currentData(), 10)
+        self.assertEqual(self.window.list_widget.font().pixelSize(), 10)
 
     def test_largest_font_keeps_controls_readable_at_minimum_window_size(self):
-        self.window.resize(860, 680)
+        self.window.resize(840, 638)
         self.window.font_size.setCurrentIndex(self.window.font_size.findData(16))
         self.window.apply_settings()
         self.app.processEvents()
@@ -331,11 +331,11 @@ class DesignUITests(unittest.TestCase):
         menu = QMenu(self.window)
         menu.addAction("设置")
         menu.ensurePolished()
-        self.assertEqual(menu.font().pointSize(), 16)
+        self.assertEqual(menu.font().pixelSize(), 16)
         menu.deleteLater()
 
     def test_update_channel_and_button_remain_reachable_at_largest_font(self):
-        self.window.resize(860, 680)
+        self.window.resize(840, 638)
         self.window.tabs.setCurrentIndex(1)
         self.window.font_size.setCurrentIndex(self.window.font_size.findData(16))
         self.window.apply_settings()
@@ -355,7 +355,7 @@ class DesignUITests(unittest.TestCase):
         text = "长消息：" + "注意配合，等待队友一起行动。" * 30 + "末尾检查"
         self.messages.replace([text, "下一条短消息"])
         self.window.reload_messages()
-        self.window.resize(860, 680)
+        self.window.resize(840, 638)
         self.window.font_size.setCurrentIndex(self.window.font_size.findData(16))
         self.window.apply_settings()
         self.app.processEvents()
@@ -380,7 +380,7 @@ class DesignUITests(unittest.TestCase):
         self.messages.replace(["测试消息"] * 1000)
         self.messages.index = 999
         self.window.reload_messages(999)
-        self.window.resize(860, 680)
+        self.window.resize(840, 638)
         self.window.font_size.setCurrentIndex(self.window.font_size.findData(16))
         self.window.apply_settings()
         self.app.processEvents()
