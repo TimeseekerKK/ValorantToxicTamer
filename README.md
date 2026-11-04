@@ -112,7 +112,6 @@ ValorantToxicTamer/
 │   └── ...                    # 托盘、更新、日志和版本等模块
 ├── scripts/                   # 构建脚本
 ├── tests/                     # 自动测试、原生检查和预览工具
-├── docs/                      # 项目检查文档
 ├── requirements.txt           # 运行依赖
 ├── requirements-build.txt     # 构建依赖
 ├── data/                      # 源码运行数据与本地个人文件（不提交）
@@ -131,7 +130,7 @@ ValorantToxicTamer/
 
 源码启动仍使用 `main.py`，也支持 `.\.venv\Scripts\python.exe -m valorant_toxic_tamer`。应用内部使用包内相对导入，测试和辅助工具通过 `valorant_toxic_tamer` 导入模块。
 
-源码运行继续读写项目根目录的 `data/`；打包版继续使用 `%LOCALAPPDATA%\ValorantToxicTamer\data`。移动代码目录无需迁移已有消息或设置。UI 改版检查记录见 [docs/design-qa.md](docs/design-qa.md)。
+源码运行继续读写项目根目录的 `data/`；打包版继续使用 `%LOCALAPPDATA%\ValorantToxicTamer\data`。移动代码目录无需迁移已有消息或设置。
 
 ## 许可证
 
