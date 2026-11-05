@@ -7,7 +7,6 @@ from PySide6.QtWidgets import QMessageBox
 from .app_version import VERSION
 from .config_manager import atomic_json, load_json
 from .update_settings import UPDATE_CHANNELS
-from .update_protocol import installed_executable, version_tuple
 from .ui_theme import style_message_box
 
 
@@ -82,8 +81,8 @@ class UpdateController(QObject):
         self.window.result_label.setText("正在检查更新…")
         channel = self.channel
         def lookup():
-            from .update_process import check_for_update
-            return check_for_update(channel=channel, cancel=self.cancel)
+            from .updater import latest_release
+            return latest_release(channel=channel)
         self._start("check", lookup)
 
     def _start(self, stage, action):
@@ -112,6 +111,9 @@ class UpdateController(QObject):
             self.window.result_label.setText("检查更新失败。" if self.stage == "check" else "更新未完成。")
             self.window.error(worker.error)
             return
+        from .updater import (download_release, installed_executable,
+                              launch_installer, version_tuple)
+
         if self.stage == "check":
             release = worker.result
             if release is None:
@@ -150,15 +152,11 @@ class UpdateController(QObject):
                 return
             self.window.result_label.setText("正在下载更新，请稍候…")
             self.window.update_button.setText("下载中…")
-            def download():
-                from .updater import download_release
-                return download_release(release, self.target, self.cancel)
-            self._start("download", download)
+            self._start("download", lambda: download_release(release, self.target, self.cancel))
         elif self.stage == "download":
             staged = worker.result
             def prepare():
                 try:
-                    from .updater import launch_installer
                     launch_installer(staged, self.target)
                 except Exception:
                     staged.unlink(missing_ok=True)

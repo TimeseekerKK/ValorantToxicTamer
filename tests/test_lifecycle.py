@@ -142,28 +142,29 @@ with tempfile.TemporaryDirectory(dir='tests') as directory:
     assert controller.window.settings_loaded
     assert 'valorant_toxic_tamer.updater' not in sys.modules
     assert 'ssl' not in sys.modules and 'truststore' not in sys.modules
-    import time
-    from valorant_toxic_tamer import update_process
-    def fixture_command(channel, path):
-        code = ("import sys,json; import valorant_toxic_tamer.updater; "
-                "assert 'ssl' in sys.modules and 'truststore' in sys.modules; "
-                "open(sys.argv[1], 'w', encoding='utf-8').write(json.dumps(dict(release=None,error=None)))")
-        return [sys.executable, '-B', '-c', code, str(path)]
-    update_process.worker_command = fixture_command
+    import builtins, threading, time
+    original_import = builtins.__import__
+    import_threads = []
+    def import_update(name, globals=None, locals=None, fromlist=(), level=0):
+        result = original_import(name, globals, locals, fromlist, level)
+        if name == 'updater' and level == 1:
+            import_threads.append(threading.get_ident())
+            result.latest_release = lambda **kwargs: None
+        return result
+    builtins.__import__ = import_update
     errors = []
     controller.window.error = errors.append
     controller.window.information = lambda *args: None
-    from PySide6.QtWidgets import QMessageBox
-    QMessageBox.exec = lambda self: QMessageBox.StandardButton.No
-    for attempt in range(3):
-        controller.window.update_button.click()
-        deadline = time.monotonic() + 10
-        while controller.window.updater.busy and time.monotonic() < deadline:
-            app.processEvents()
-            time.sleep(0.01)
-        assert not controller.window.updater.busy
-        assert 'valorant_toxic_tamer.updater' not in sys.modules
-        assert 'ssl' not in sys.modules and 'truststore' not in sys.modules
+    controller.window.update_button.click()
+    deadline = time.monotonic() + 5
+    while controller.window.updater.busy and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+    builtins.__import__ = original_import
+    assert not errors, errors
+    assert not controller.window.updater.busy
+    assert import_threads and import_threads[0] != threading.get_ident()
+    assert 'ssl' in sys.modules and 'truststore' in sys.modules
     controller.window.close()
     controller.reveal()
     assert controller.hotkeys.hwnd == handle
@@ -176,6 +177,6 @@ print('cold lifecycle passed')
 '''
         result = subprocess.run([sys.executable, "-B", "-c", code],
                                 cwd=Path(__file__).resolve().parents[1],
-                                capture_output=True, text=True, timeout=40)
+                                capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("cold lifecycle passed", result.stdout)
