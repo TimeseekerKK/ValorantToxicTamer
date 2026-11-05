@@ -7,11 +7,11 @@ from PySide6.QtWidgets import (QDialog, QFileDialog, QFormLayout,
     QMessageBox, QScrollArea, QSizePolicy, QStackedWidget, QStyle,
     QStyledItemDelegate, QTabWidget, QVBoxLayout, QWidget)
 
-from .config_manager import FONT_SIZES, HOTKEYS
+from .config_manager import DEFAULT_CONFIG, FONT_SIZES, HOTKEYS
 from .app_version import VERSION
 from .tray import app_icon
 from .update_controller import UpdateController
-from .updater import UPDATE_CHANNELS
+from .update_settings import UPDATE_CHANNELS
 from .ui_theme import (MUTED, RED, TEXT, CutButton, CutComboBox, CutLineEdit,
                       CutTabBar, MessageDialog, Panel, TacticalCheckBox, style_for_font_size,
                       style_message_box, UpdateButton)
@@ -43,7 +43,7 @@ class MessageDelegate(QStyledItemDelegate):
         digits = max(2, len(str(self.window.list_widget.count())))
         number = max(36, max(metrics.horizontalAdvance(str(i) * digits) for i in range(10)))
         upcoming_font = QFont(self.window.list_widget.font())
-        upcoming_font.setPointSizeF(max(8, upcoming_font.pointSizeF() - 1))
+        upcoming_font.setPixelSize(max(8, upcoming_font.pixelSize() - 1))
         upcoming = max(60, QFontMetrics(upcoming_font).horizontalAdvance("下一条"))
         return number, upcoming
 
@@ -84,7 +84,7 @@ class MessageDelegate(QStyledItemDelegate):
                          index.data(Qt.ItemDataRole.UserRole) or "")
         if upcoming:
             font = QFont(option.font)
-            font.setPointSizeF(max(8, font.pointSizeF() - 1))
+            font.setPixelSize(max(8, font.pixelSize() - 1))
             painter.setFont(font)
             painter.setPen(QColor("#ff8290"))
             painter.drawText(QRect(rect.right() - upcoming_width - 6, rect.top(), upcoming_width, rect.height()),
@@ -130,10 +130,12 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.messages, self.config, self.sender = messages, config, sender
         self.save_settings = save_settings
+        self.settings_loaded = False
+        self.updater = UpdateController(self)
         self.setWindowTitle(f"ValorantToxicTamer · V{VERSION}")
         self.setWindowIcon(app_icon())
-        self.resize(1120, 850)
-        self.setMinimumSize(860, 680)
+        self.resize(840, 638)
+        self.setMinimumSize(840, 638)
         self.setStyleSheet(style_for_font_size(config.value["font_size"]))
         self.next_index = -1
         root = QWidget()
@@ -157,20 +159,40 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.tabs, 1)
         self.edit_buttons = []
         self.tabs.addTab(self.build_management(), "消息管理")
-        self.tabs.addTab(self.build_settings(), "设置")
+        self.settings_placeholder = QWidget()
+        self.tabs.addTab(self.settings_placeholder, "设置")
+        self.tabs.currentChanged.connect(self._page_changed)
         layout.addWidget(separator())
         self.result_label = label("就绪 · 请添加消息，然后在游戏前台使用快捷键。", wrap=True)
         layout.addWidget(self.result_label)
         layout.addWidget(label("发送前请关闭游戏聊天框，并松开修饰键。程序无法确认聊天框状态或服务器送达。",
                                "muted", True))
-        self.load_settings()
+        self.timer = QTimer(self)
+        self.timer.setInterval(100)
+        self.timer.timeout.connect(self.refresh_status)
         self.reload_messages()
         self.apply_font_size()
         if self.messages.messages:
             self.result_label.setText("就绪 · 在游戏前台使用快捷键，按顺序输入下一条消息。")
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.refresh_status)
-        self.timer.start(100)
+
+    def _page_changed(self, page):
+        if page == 1:
+            self.ensure_settings()
+
+    def ensure_settings(self):
+        if self.settings_loaded:
+            return
+        settings = self.build_settings()
+        current = self.tabs.currentIndex()
+        self.tabs.blockSignals(True)
+        self.tabs.removeTab(1)
+        self.tabs.insertTab(1, settings, "设置")
+        self.tabs.setCurrentIndex(current)
+        self.tabs.blockSignals(False)
+        self.settings_placeholder.deleteLater()
+        self.settings_loaded = True
+        self.load_settings()
+        self.update_actions()
 
     def button(self, text, action, *, primary=False, icon=None):
         button = CutButton(text, primary=primary)
@@ -257,6 +279,7 @@ class MainWindow(QMainWindow):
         buttons = QHBoxLayout()
         self.edit_button = self.button("编辑", self.edit_message)
         self.delete_button = self.button("删除", self.delete_message)
+        self.clear_button = self.button("清空列表", self.clear_messages)
         self.up_button = self.button("", lambda: self.move(-1), icon=QStyle.StandardPixmap.SP_ArrowUp)
         self.down_button = self.button("", lambda: self.move(1), icon=QStyle.StandardPixmap.SP_ArrowDown)
         for button, name in ((self.up_button, "上移"), (self.down_button, "下移")):
@@ -265,8 +288,8 @@ class MainWindow(QMainWindow):
             button.setToolTip(name)
         self.export_button = self.button("导出 TXT", self.export_txt)
         self.edit_buttons = [self.add_button, self.import_button, self.edit_button,
-                             self.delete_button, self.up_button, self.down_button, self.export_button]
-        for button in (self.edit_button, self.delete_button, self.up_button, self.down_button):
+                             self.delete_button, self.clear_button, self.up_button, self.down_button, self.export_button]
+        for button in (self.edit_button, self.delete_button, self.clear_button, self.up_button, self.down_button):
             buttons.addWidget(button)
         buttons.addStretch()
         buttons.addWidget(self.export_button)
@@ -319,7 +342,7 @@ class MainWindow(QMainWindow):
         self.font_size = CutComboBox(wheel_changes=False)
         self.font_size.setAccessibleName("字体大小")
         for size in FONT_SIZES:
-            self.font_size.addItem(f"{size} pt" + ("（默认）" if size == 11 else ""), size)
+            self.font_size.addItem(f"{size} px" + ("（默认）" if size == DEFAULT_CONFIG["font_size"] else ""), size)
         font_form = QFormLayout()
         font_form.setHorizontalSpacing(22)
         font_caption = label("字体大小")
@@ -366,7 +389,7 @@ class MainWindow(QMainWindow):
         about.addWidget(self.update_channel_hint)
         self.update_button = UpdateButton()
         self.update_button.clicked.connect(lambda: self.updater.check())
-        self.updater = UpdateController(self)
+        self.updater.bind_widgets()
         about.addWidget(self.update_button)
         about.addWidget(separator())
         about.addWidget(label("本地数据", "section"))
@@ -448,8 +471,6 @@ class MainWindow(QMainWindow):
         self.all_hint.setText(self.config.value["all_hotkey"])
 
     def update_actions(self, *_):
-        if not hasattr(self, "save_button"):
-            return
         row = self.list_widget.currentRow()
         count = self.list_widget.count()
         with self.sender.lock:
@@ -458,22 +479,25 @@ class MainWindow(QMainWindow):
         self.import_button.setEnabled(idle)
         self.edit_button.setEnabled(idle and row >= 0)
         self.delete_button.setEnabled(idle and row >= 0)
+        self.clear_button.setEnabled(idle and count > 0)
         self.up_button.setEnabled(idle and row > 0)
         self.down_button.setEnabled(idle and 0 <= row < count - 1)
         self.export_button.setEnabled(idle and count > 0)
-        self.save_button.setEnabled(idle)
+        if self.settings_loaded:
+            self.save_button.setEnabled(idle)
 
     def refresh_status(self):
         with self.sender.lock:
             count, index = len(self.messages.messages), self.messages.index
             remaining = max(0, self.sender.ready_at - self.sender.clock())
-            state = ("正在输入" if self.sender.busy else f"冷却 {remaining:.1f}s" if remaining
+            busy = self.sender.busy
+            state = ("正在输入" if busy else f"冷却 {remaining:.1f}s" if remaining
                      else "就绪" if count else "等待添加消息")
             current = self.messages.current or "暂无消息"
         position = index + 1 if count else 0
         self.state_label.setText(f"● {state}  |  {position} / {count}")
         self.progress_label.setText(f'<span style="color:{RED}">{position:02d}</span>'
-                                    f' <span style="font-size:{self.config.value["font_size"] + 9}pt">/ {count:02d}</span>')
+                                    f' <span style="font-size:{self.config.value["font_size"] + 9}px">/ {count:02d}</span>')
         if self.next_label.text() != current:
             self.next_label.setText(current)
             self.next_label.setToolTip(current)
@@ -484,9 +508,16 @@ class MainWindow(QMainWindow):
             self.list_widget.viewport().update()
         self.update_actions()
 
+        if self.isVisible() and (busy or remaining > 0):
+            if not self.timer.isActive():
+                self.timer.start()
+        else:
+            self.timer.stop()
+
     def report(self, message):
         self.result_label.setText(message)
-        self.refresh_status()
+        if self.isVisible():
+            self.refresh_status()
 
     def reload_messages(self, row=0):
         self.list_widget.clear()
@@ -551,6 +582,25 @@ class MainWindow(QMainWindow):
             values.pop(row)
             self.change(lambda: self.messages.replace(values), row)
 
+    def clear_messages(self):
+        count = len(self.messages.messages)
+        if not count:
+            return
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("清空消息列表")
+        dialog.setText(f"确定删除列表中的全部 {count} 条消息？")
+        dialog.setInformativeText("清空后会自动保存，无法撤销。如需保留，请先取消并导出 TXT 备份。")
+        dialog.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        dialog.button(QMessageBox.StandardButton.Yes).setText("清空列表")
+        dialog.button(QMessageBox.StandardButton.No).setText("取消")
+        dialog.setDefaultButton(QMessageBox.StandardButton.No)
+        dialog.setEscapeButton(QMessageBox.StandardButton.No)
+        style_message_box(dialog, QMessageBox.StandardButton.Yes)
+        answer = dialog.exec()
+        dialog.deleteLater()
+        if answer == QMessageBox.StandardButton.Yes:
+            self.change(lambda: self.messages.replace([]))
+
     def move(self, direction):
         row = self.list_widget.currentRow()
         target = row + direction
@@ -598,3 +648,11 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         self.hide()
         event.ignore()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.refresh_status()
+
+    def hideEvent(self, event):
+        self.timer.stop()
+        super().hideEvent(event)

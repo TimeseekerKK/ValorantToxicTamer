@@ -330,7 +330,7 @@ class CoreTests(unittest.TestCase):
         path.write_text(json.dumps(legacy), encoding="utf-8")
         before = path.read_bytes()
         config = ConfigManager(path)
-        self.assertEqual(config.value, {**legacy, "font_size": 11})
+        self.assertEqual(config.value, {**legacy, "font_size": 13})
         self.assertEqual(path.read_bytes(), before)
         config.save({**config.value, "font_size": 16})
         self.assertEqual(ConfigManager(path).value, {**legacy, "font_size": 16})

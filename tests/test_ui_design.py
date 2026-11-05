@@ -31,6 +31,8 @@ class DesignUITests(unittest.TestCase):
         self.config = ConfigManager(root / "config.json")
         self.sender = Sender(self.messages, Mock())
         self.window = MainWindow(self.messages, self.config, self.sender, self.config.save)
+        self.window.tabs.setCurrentIndex(1)
+        self.window.tabs.setCurrentIndex(0)
         self.window.error = Mock()
         self.window.show()
         self.app.processEvents()
@@ -70,7 +72,92 @@ class DesignUITests(unittest.TestCase):
         self.assertTrue(self.window.add_button.isEnabled())
         self.assertTrue(self.window.import_button.isEnabled())
         self.assertFalse(self.window.edit_button.isEnabled())
+        self.assertFalse(self.window.clear_button.isEnabled())
         self.assertFalse(self.window.export_button.isEnabled())
+
+    def test_clear_list_confirms_count_and_persists_empty_state(self):
+        self.messages.advance()
+        self.window.list_widget.setCurrentRow(-1)
+        self.assertTrue(self.window.clear_button.isEnabled())
+        observed = {}
+
+        def confirm():
+            dialog = self.app.activeModalWidget()
+            observed["text"] = dialog.text()
+            observed["default"] = dialog.standardButton(dialog.defaultButton())
+            dialog.button(QMessageBox.StandardButton.Yes).click()
+
+        QTimer.singleShot(0, confirm)
+        QTest.mouseClick(self.window.clear_button, Qt.MouseButton.LeftButton)
+        self.assertIn("全部 3 条消息", observed["text"])
+        self.assertEqual(observed["default"], QMessageBox.StandardButton.No)
+        self.assertEqual(self.messages.messages, [])
+        self.assertEqual(MessageManager(self.messages.path).messages, [])
+        self.assertEqual(self.messages.index, 0)
+        self.assertEqual(self.window.list_widget.count(), 0)
+        self.assertEqual(self.window.message_stack.currentIndex(), 1)
+        self.assertEqual(self.window.count_label.text(), "0 条")
+        self.assertEqual(self.window.next_label.text(), "暂无消息")
+        self.assertIn("0 / 0", self.window.state_label.text())
+        self.assertFalse(self.window.clear_button.isEnabled())
+        self.assertFalse(self.window.delete_button.isEnabled())
+        self.assertFalse(self.window.export_button.isEnabled())
+
+    def test_clear_list_cancel_enter_escape_and_close_preserve_messages(self):
+        self.messages.advance()
+        before = self.messages.path.read_bytes()
+        for action in ("cancel", "enter", "escape", "close"):
+            with self.subTest(action=action):
+                def cancel():
+                    dialog = self.app.activeModalWidget()
+                    if action == "cancel":
+                        dialog.button(QMessageBox.StandardButton.No).click()
+                    elif action == "close":
+                        dialog.close()
+                    else:
+                        QTest.keyClick(dialog, Qt.Key.Key_Return if action == "enter" else Qt.Key.Key_Escape)
+                QTimer.singleShot(0, cancel)
+                self.window.clear_messages()
+                self.assertEqual(self.messages.path.read_bytes(), before)
+                self.assertEqual(self.messages.messages, ["第一条", "第二条", "第三条"])
+                self.assertEqual(self.messages.index, 1)
+                self.assertEqual(self.window.list_widget.count(), 3)
+
+    def test_clear_list_save_failure_keeps_messages_and_progress(self):
+        self.messages.advance()
+        before = self.messages.path.read_bytes()
+        QTimer.singleShot(0, lambda: self.app.activeModalWidget().button(QMessageBox.StandardButton.Yes).click())
+        with patch("valorant_toxic_tamer.config_manager.os.replace", side_effect=OSError("disk full")):
+            self.window.clear_messages()
+        self.window.error.assert_called_once()
+        self.assertEqual(self.messages.path.read_bytes(), before)
+        self.assertEqual(self.messages.messages, ["第一条", "第二条", "第三条"])
+        self.assertEqual(self.messages.index, 1)
+        self.assertEqual(self.window.list_widget.count(), 3)
+
+    def test_clear_list_rechecks_sending_state_after_confirmation(self):
+        before = self.messages.path.read_bytes()
+
+        def confirm_while_busy():
+            self.sender.busy = True
+            self.app.activeModalWidget().button(QMessageBox.StandardButton.Yes).click()
+
+        QTimer.singleShot(0, confirm_while_busy)
+        try:
+            self.window.clear_messages()
+        finally:
+            self.sender.busy = False
+        self.window.error.assert_called_once()
+        self.assertEqual(self.messages.path.read_bytes(), before)
+        self.assertEqual(self.messages.messages, ["第一条", "第二条", "第三条"])
+
+    def test_clear_empty_list_does_not_open_confirmation_or_save(self):
+        self.messages.replace([])
+        self.window.reload_messages()
+        with patch("valorant_toxic_tamer.ui.QMessageBox") as dialog, patch.object(self.messages, "replace") as replace:
+            self.window.clear_messages()
+        dialog.assert_not_called()
+        replace.assert_not_called()
 
     def test_dropdown_popup_retains_keyboard_selection(self):
         self.window.tabs.setCurrentIndex(1)
@@ -118,7 +205,7 @@ class DesignUITests(unittest.TestCase):
         self.assertEqual(self.messages.path.read_bytes(), before)
 
     def test_minimum_size_keeps_primary_controls_inside_workspaces(self):
-        self.window.resize(860, 680)
+        self.window.resize(840, 638)
         self.messages.replace(["很长的消息" * 100])
         self.window.reload_messages()
         self.app.processEvents()
@@ -141,34 +228,35 @@ class DesignUITests(unittest.TestCase):
         QTest.keyClick(self.window.font_size, Qt.Key.Key_End)
         self.assertEqual(self.window.font_size.currentData(), 16)
         self.assertIn("未保存", self.window.settings_hint.text())
-        self.assertEqual(self.window.list_widget.font().pointSize(), 11)
+        self.assertEqual(self.window.list_widget.font().pixelSize(), 13)
         QTest.mouseClick(self.window.save_button, Qt.MouseButton.LeftButton)
         self.app.processEvents()
         self.assertEqual(self.config.value["font_size"], 16)
         self.assertEqual(ConfigManager(self.config.path).value["font_size"], 16)
-        self.assertEqual(self.window.list_widget.font().pointSize(), 16)
+        self.assertEqual(self.window.list_widget.font().pixelSize(), 16)
         self.assertGreater(self.window.list_widget.sizeHintForRow(0), old_height)
-        self.assertEqual(self.window.next_label.font().pointSize(), 24)
+        self.assertEqual(self.window.next_label.font().pixelSize(), 24)
         for dialog in (MessageDialog(self.window, "添加消息"), QMessageBox(self.window)):
             try:
                 if isinstance(dialog, QMessageBox):
                     style_message_box(dialog)
                 dialog.ensurePolished()
-                self.assertEqual(dialog.font().pointSize(), 16)
+                self.assertEqual(dialog.font().pixelSize(), 16)
             finally:
                 dialog.deleteLater()
         restarted = MainWindow(self.messages, ConfigManager(self.config.path), self.sender, self.config.save)
         try:
+            restarted.tabs.setCurrentIndex(1)
             restarted.ensurePolished()
             self.assertEqual(restarted.font_size.currentData(), 16)
-            self.assertEqual(restarted.list_widget.font().pointSize(), 16)
+            self.assertEqual(restarted.list_widget.font().pixelSize(), 16)
         finally:
             restarted.timer.stop()
             restarted.updater.shutdown()
             restarted.deleteLater()
 
     def test_wheel_over_font_size_scrolls_settings_without_changing_selection(self):
-        self.window.resize(860, 680)
+        self.window.resize(840, 638)
         self.window.tabs.setCurrentIndex(1)
         box = self.window.font_size
         scroll = self.window.tabs.currentWidget().findChild(QScrollArea)
@@ -184,7 +272,7 @@ class DesignUITests(unittest.TestCase):
                     old_scroll = scroll.verticalScrollBar().value()
                     QTest.wheelEvent(self.window.windowHandle(), position, QPoint(0, delta))
                     self.app.processEvents()
-                    self.assertEqual(box.currentData(), 11)
+                    self.assertEqual(box.currentData(), 13)
                     self.assertNotIn("未保存", self.window.settings_hint.text())
                     self.assertEqual(self.config.path.read_bytes(), before)
                     if delta < 0:
@@ -219,11 +307,11 @@ class DesignUITests(unittest.TestCase):
             self.window.apply_settings()
         self.window.error.assert_called_once()
         self.assertEqual(self.config.path.read_bytes(), before)
-        self.assertEqual(self.window.font_size.currentData(), 11)
-        self.assertEqual(self.window.list_widget.font().pointSize(), 11)
+        self.assertEqual(self.window.font_size.currentData(), 13)
+        self.assertEqual(self.window.list_widget.font().pixelSize(), 13)
 
     def test_largest_font_keeps_controls_readable_at_minimum_window_size(self):
-        self.window.resize(860, 680)
+        self.window.resize(840, 638)
         self.window.font_size.setCurrentIndex(self.window.font_size.findData(16))
         self.window.apply_settings()
         self.app.processEvents()
@@ -246,11 +334,11 @@ class DesignUITests(unittest.TestCase):
         menu = QMenu(self.window)
         menu.addAction("设置")
         menu.ensurePolished()
-        self.assertEqual(menu.font().pointSize(), 16)
+        self.assertEqual(menu.font().pixelSize(), 16)
         menu.deleteLater()
 
     def test_update_channel_and_button_remain_reachable_at_largest_font(self):
-        self.window.resize(860, 680)
+        self.window.resize(840, 638)
         self.window.tabs.setCurrentIndex(1)
         self.window.font_size.setCurrentIndex(self.window.font_size.findData(16))
         self.window.apply_settings()
@@ -270,7 +358,7 @@ class DesignUITests(unittest.TestCase):
         text = "长消息：" + "注意配合，等待队友一起行动。" * 30 + "末尾检查"
         self.messages.replace([text, "下一条短消息"])
         self.window.reload_messages()
-        self.window.resize(860, 680)
+        self.window.resize(840, 638)
         self.window.font_size.setCurrentIndex(self.window.font_size.findData(16))
         self.window.apply_settings()
         self.app.processEvents()
@@ -295,7 +383,7 @@ class DesignUITests(unittest.TestCase):
         self.messages.replace(["测试消息"] * 1000)
         self.messages.index = 999
         self.window.reload_messages(999)
-        self.window.resize(860, 680)
+        self.window.resize(840, 638)
         self.window.font_size.setCurrentIndex(self.window.font_size.findData(16))
         self.window.apply_settings()
         self.app.processEvents()

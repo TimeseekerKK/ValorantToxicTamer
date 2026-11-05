@@ -6,8 +6,8 @@ from PySide6.QtWidgets import QMessageBox
 
 from .app_version import VERSION
 from .config_manager import atomic_json, load_json
-from .updater import (UPDATE_CHANNELS, download_release, installed_executable,
-                      latest_release, launch_installer, version_tuple)
+from .update_settings import UPDATE_CHANNELS
+from .update_protocol import installed_executable, version_tuple
 from .ui_theme import style_message_box
 
 
@@ -43,6 +43,9 @@ class UpdateController(QObject):
             if not isinstance(value, dict) or set(value) != {"channel"} or value["channel"] not in UPDATE_CHANNELS:
                 raise ValueError("更新渠道设置无效。")
         self.channel = load_json(self.preferences_path, {"channel": "stable"}, validate)["channel"]
+
+    def bind_widgets(self):
+        window = self.window
         window.update_channel.setCurrentIndex(window.update_channel.findData(self.channel))
         window.update_channel.currentIndexChanged.connect(self.change_channel)
         self._channel_hint()
@@ -78,7 +81,10 @@ class UpdateController(QObject):
         self.window.update_button.setText("检查中…")
         self.window.result_label.setText("正在检查更新…")
         channel = self.channel
-        self._start("check", lambda: latest_release(channel=channel))
+        def lookup():
+            from .update_process import check_for_update
+            return check_for_update(channel=channel, cancel=self.cancel)
+        self._start("check", lookup)
 
     def _start(self, stage, action):
         self.stage = stage
@@ -144,11 +150,15 @@ class UpdateController(QObject):
                 return
             self.window.result_label.setText("正在下载更新，请稍候…")
             self.window.update_button.setText("下载中…")
-            self._start("download", lambda: download_release(release, self.target, self.cancel))
+            def download():
+                from .updater import download_release
+                return download_release(release, self.target, self.cancel)
+            self._start("download", download)
         elif self.stage == "download":
             staged = worker.result
             def prepare():
                 try:
+                    from .updater import launch_installer
                     launch_installer(staged, self.target)
                 except Exception:
                     staged.unlink(missing_ok=True)
@@ -162,7 +172,8 @@ class UpdateController(QObject):
 
     def shutdown(self):
         self.closing = True
-        self.window.update_button.set_busy(False)
+        if hasattr(self.window, "update_button"):
+            self.window.update_button.set_busy(False)
         self.cancel.set()
         if self.worker:
             self.worker.wait()

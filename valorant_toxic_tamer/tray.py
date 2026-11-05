@@ -3,6 +3,14 @@ from PySide6.QtCore import QPoint
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
 
+MENU_STYLE = """
+QMenu { background: #17222e; border: 1px solid #415263; padding: 5px; }
+QMenu::item { padding: 9px 24px; }
+QMenu::item:selected { background: #303e4e; border-left: 2px solid #ff4655; }
+QMenu::separator { height: 1px; background: #344454; margin: 5px 8px; }
+"""
+
+
 def app_icon():
     pixmap = QPixmap(64, 64)
     pixmap.fill(QColor("#101b29"))
@@ -17,16 +25,21 @@ def app_icon():
 
 
 class Tray(QSystemTrayIcon):
-    def __init__(self, window, quit_callback):
-        super().__init__(app_icon(), window)
+    def __init__(self, reveal, quit_callback, parent=None, *, font_size=13):
+        super().__init__(app_icon(), parent)
         self.setToolTip("ValorantToxicTamer")
-        self.menu = QMenu(window)
+        self.menu = QMenu()
+        self.set_font_size(font_size)
         for title, page in (("显示主窗口", 0), ("消息管理", 0), ("设置", 1), ("运行状态", 0)):
             action = self.menu.addAction(title)
-            action.triggered.connect(lambda checked=False, p=page: window.reveal(p))
+            action.triggered.connect(lambda checked=False, p=page: reveal(p))
         self.menu.addSeparator()
         self.menu.addAction("退出程序", quit_callback)
         self.setContextMenu(self.menu)
-        self.activated.connect(lambda reason: window.reveal(0)
+        self.activated.connect(lambda reason: reveal(0)
                                if reason == QSystemTrayIcon.ActivationReason.DoubleClick else None)
         self.show()
+
+    def set_font_size(self, font_size):
+        self.menu.setStyleSheet(
+            f"QMenu {{ color: #edf2f6; font: {font_size}px 'Microsoft YaHei UI'; }}\n" + MENU_STYLE)

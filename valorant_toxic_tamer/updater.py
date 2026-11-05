@@ -1,5 +1,4 @@
 """GitHub Release lookup, verified staging and a detached Windows updater."""
-from dataclasses import dataclass
 import hashlib
 import json
 import os
@@ -19,21 +18,14 @@ from urllib.request import Request, urlopen
 import truststore
 
 from .app_version import VERSION
+from .update_settings import UPDATE_CHANNELS
+from .update_protocol import Release, installed_executable, version_tuple
 
 
 REPOSITORY = "TimeseekerKK/ValorantToxicTamer"
 LATEST_URL = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
 RELEASES_URL = f"https://api.github.com/repos/{REPOSITORY}/releases"
-UPDATE_CHANNELS = {"stable": "正式版 Release", "beta": "测试版 Beta"}
 EXE_NAME = "ValorantToxicTamer.exe"
-
-
-def version_tuple(value):
-    match = re.fullmatch(r"[vV]?(\d+)\.(\d+)(?:\.(\d+))?(?:(-beta)(?:\.([1-9]\d*))?)?", value)
-    if not match:
-        raise ValueError(f"无法识别版本号：{value}（应为 v1.2.3 或 v1.2.3-beta.1 格式）")
-    major, minor, patch, beta, number = match.groups()
-    return (int(major), int(minor), int(patch or 0), int(beta is None), int(number or 0))
 
 
 def _open_update_url(request):
@@ -51,14 +43,6 @@ def _open_update_url(request):
                 "修复后请重新检查更新。"
             ) from exc
         raise
-
-
-@dataclass(frozen=True)
-class Release:
-    version: str
-    url: str
-    size: int
-    digest: str | None
 
 
 def _release_json(url):
@@ -135,12 +119,6 @@ def latest_release(current=VERSION, *, channel="stable"):
     if digest is not None and not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest):
         raise ValueError("GitHub 返回了不支持的文件校验信息。")
     return Release(tag, url, size, digest)
-
-
-def installed_executable():
-    if sys.platform != "win32" or not getattr(sys, "frozen", False):
-        raise ValueError("覆盖更新仅支持打包后的 Windows EXE，请使用发布版程序。")
-    return Path(sys.executable).resolve()
 
 
 def download_release(release, target, cancel):

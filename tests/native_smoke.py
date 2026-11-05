@@ -26,7 +26,7 @@ with tempfile.TemporaryDirectory(dir=root / "tests") as directory:
     controller = Application(app, Path(directory))
     result["hotkeys"] = controller.hotkeys.status.copy()
     result["empty_messages"] = controller.messages.messages == []
-    result["starts_hidden"] = not controller.window.isVisible()
+    result["starts_hidden"] = controller.window is None
 
     def show():
         controller.tray.menu.actions()[2].trigger()
@@ -35,6 +35,7 @@ with tempfile.TemporaryDirectory(dir=root / "tests") as directory:
         result["settings_opened"] = controller.window.isVisible() and controller.window.tabs.currentIndex() == 1
         controller.window.close()
         result["close_hides"] = not controller.window.isVisible()
+        result["hidden_timer_stopped"] = not controller.window.timer.isActive()
         result["tray_visible"] = controller.tray.isVisible()
         controller.tray.menu.actions()[-1].trigger()
 
