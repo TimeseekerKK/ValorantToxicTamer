@@ -122,6 +122,9 @@ def main():
     if len(sys.argv) == 3 and sys.argv[1] == "--startup-check":
         from .startup_check import run
         return run(app, sys.argv[2])
+    if len(sys.argv) == 3 and sys.argv[1] == "--update-check-smoke":
+        from .startup_check import run_update_check
+        return run_update_check(app, sys.argv[2])
     if sys.platform != "win32":
         QMessageBox.critical(None, "平台不支持", "本程序仅支持 Windows 10 / 11。")
         return 1
