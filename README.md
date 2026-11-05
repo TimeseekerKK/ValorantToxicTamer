@@ -20,7 +20,7 @@
 
 ### 1. 启动程序
 
-如果已有打包好的程序，双击 `ValorantToxicTamer.exe` 即可启动。
+如果已有打包好的程序，双击 `ValorantToxicTamer-v<完整版本号>.exe` 即可启动，例如 `ValorantToxicTamer-v1.4.0-beta.3.exe`。
 
 从源码运行时，先安装 Python 3.11，在项目目录打开 PowerShell，执行：
 
@@ -94,7 +94,7 @@ py -3.11 -m venv .venv
 
 默认使用正式版渠道。版本比较支持 `beta.N`，Beta 序号按整数比较，同基础号正式版高于 Beta。更新渠道单独保存在数据目录的 `update_settings.json`，不改变消息和已有设置文件的格式，便于切回旧正式版。
 
-正式发布时使用 `v1.2.3` 形式的版本标签，Beta 使用 `v1.2.3-beta.1`；同步修改 `valorant_toxic_tamer/app_version.py` 中的 `VERSION`，并上传单文件 `ValorantToxicTamer.exe`。通过 `scripts/build.ps1` 打包时会一并包含独立更新脚本和证书验证依赖。
+正式发布时使用 `v1.2.3` 形式的版本标签，Beta 使用 `v1.2.3-beta.1`；同步修改 `valorant_toxic_tamer/app_version.py` 中的 `VERSION`，并上传单文件 `ValorantToxicTamer-v<完整版本号>.exe`，保留 `-beta.N` 后缀。每个 Release 只上传一个程序 EXE，更新器支持这种附件名称。通过 `scripts/build.ps1` 打包时会自动读取 `VERSION` 生成文件名，并一并包含独立更新脚本和证书验证依赖。自动更新覆盖原路径的 EXE，保留原文件名。
 
 ### 常见问题
 
@@ -180,6 +180,8 @@ ValorantToxicTamer/
 .\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
 .\scripts\build.ps1
 ```
+
+打包产物位于 `dist/ValorantToxicTamer-v<完整版本号>.exe`，例如 `dist/ValorantToxicTamer-v1.4.0-beta.3.exe`。文件名与打包依赖检查路径均由同一份 `VERSION` 自动生成，无需手动改名。
 
 源码启动仍使用 `main.py`，也支持 `.\.venv\Scripts\python.exe -m valorant_toxic_tamer`。应用内部使用包内相对导入，测试和辅助工具通过 `valorant_toxic_tamer` 导入模块。
 
