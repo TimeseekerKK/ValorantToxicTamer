@@ -1,4 +1,4 @@
-# ValorantToxicTamer · v1.4.0
+# ValorantToxicTamer · v1.5.0
 
 **Valorant反嘴臭工具**。Windows 托盘快捷消息工具，支持自定义消息及队伍、全体聊天快捷发送。目标运行环境为 Windows 10 / 11、Python 3.11、PySide6。
 
@@ -20,7 +20,7 @@
 
 ### 1. 启动程序
 
-如果已有打包好的程序，双击 `ValorantToxicTamer-v<完整版本号>.exe` 即可启动，例如 `ValorantToxicTamer-v1.4.0.exe`。
+如果已有打包好的程序，双击 `ValorantToxicTamer-v<完整版本号>.exe` 即可启动，例如 `ValorantToxicTamer-v1.5.0.exe`。
 
 从源码运行时，先安装 Python 3.11，在项目目录打开 PowerShell，执行：
 
@@ -45,10 +45,13 @@ py -3.11 -m venv .venv
 - **上移 / 下移**：调整消息的发送顺序。
 - **TXT 导入**：从文本文件追加消息，每行一条，空行会被忽略。
 - **TXT 导出**：将当前列表导出，方便备份或迁移。
+- **搜索**：按消息内容筛选，忽略英文字母大小写；显示匹配条数，保留原序号，不改变发送顺序或进度。筛选期间不能上移、下移；清空搜索后可继续调整顺序。
 
 所有消息更改自动保存。修改列表或重新启动程序后，循环从第一条开始；窗口上方的「下一条」显示接下来要发送的内容。选中列表中的某条消息用于编辑，不会改变发送顺序。
 
 导入文件建议使用 UTF-8 编码，也支持 UTF-8 BOM 和 GB18030；导出文件为带 BOM 的 UTF-8。每条消息不能包含换行、制表符或控制字符。
+
+导入文件在后台读取、校验，完成后显示非空消息数、重复条数和前 5 条内容预览。默认保留重复消息，也可勾选「跳过重复消息」；重复按完整内容比较，同时包含与现有列表重复和文件内重复的条目。确认后追加并自动保存，取消不会修改列表或发送进度。单个文件最大 8 MiB、单次最多导入 20000 条消息；超过限制请拆分导入。
 
 ### 3. 在游戏中发送
 
@@ -93,6 +96,8 @@ py -3.11 -m venv .venv
 更新查询和下载使用 Windows 原生证书信任链，保持 HTTPS 证书与主机名校验。若仍提示证书校验失败，请检查系统日期时间、Windows 证书更新，以及代理或安全软件的 HTTPS 证书设置，然后重试。
 
 默认使用正式版渠道。版本比较支持 `beta.N`，Beta 序号按整数比较，同基础号正式版高于 Beta。更新渠道单独保存在数据目录的 `update_settings.json`，不改变消息和已有设置文件的格式，便于切回旧正式版。
+
+更新渠道文件损坏或无法读取时，程序暂用正式版渠道，消息管理和快捷发送仍可使用，原文件不会自动覆盖。在设置页点击「恢复更新设置」，或重新选择渠道，会先将原文件备份为同目录的 `update_settings.invalid-*.json`，再保存渠道；备份或保存失败时会提示错误并保留原文件。
 
 正式发布时使用 `v1.2.3` 形式的版本标签，Beta 使用 `v1.2.3-beta.1`；同步修改 `valorant_toxic_tamer/app_version.py` 中的 `VERSION`，并上传单文件 `ValorantToxicTamer-v<完整版本号>.exe`，保留 `-beta.N` 后缀。每个 Release 只上传一个程序 EXE，更新器支持这种附件名称。通过 `scripts/build.ps1` 打包时会自动读取 `VERSION` 生成文件名，并一并包含独立更新脚本和证书验证依赖。自动更新覆盖原路径的 EXE，保留原文件名。
 
@@ -181,11 +186,28 @@ ValorantToxicTamer/
 .\scripts\build.ps1
 ```
 
-打包产物位于 `dist/ValorantToxicTamer-v<完整版本号>.exe`，例如 `dist/ValorantToxicTamer-v1.4.0.exe`。文件名与打包依赖检查路径均由同一份 `VERSION` 自动生成，无需手动改名。
+打包产物位于 `dist/ValorantToxicTamer-v<完整版本号>.exe`，例如 `dist/ValorantToxicTamer-v1.5.0.exe`。文件名与打包依赖检查路径均由同一份 `VERSION` 自动生成，无需手动改名。
 
 源码启动仍使用 `main.py`，也支持 `.\.venv\Scripts\python.exe -m valorant_toxic_tamer`。应用内部使用包内相对导入，测试和辅助工具通过 `valorant_toxic_tamer` 导入模块。
 
 源码运行继续读写项目根目录的 `data/`；打包版继续使用 `%LOCALAPPDATA%\ValorantToxicTamer\data`。移动代码目录无需迁移已有消息或设置。
+
+### 自动检查与性能基线
+
+推送 `main` / `Beta`、向这两个分支提交 PR 或手动运行工作流时，GitHub Actions 会在 Windows / Python 3.11 上执行自动测试、依赖检查、EXE 构建和打包依赖检查，并上传 EXE 与源码、打包版的性能报告。CI 不会自动创建 Release。
+
+本地记录性能基线：
+
+```powershell
+.\.venv\Scripts\python.exe -B scripts/performance_baseline.py --output artifacts/performance/baseline.json
+.\.venv\Scripts\python.exe -B scripts/performance_baseline.py --baseline artifacts/performance/baseline.json --output artifacts/performance/current.json
+```
+
+默认在 3 个独立进程中测量并取中位数，覆盖隐藏初始化、打开窗口和设置、加载与搜索 5000 条消息、导入 1000 条消息，以及连续 3 次更新检查。报告包含各阶段耗时、工作集、私有提交内存和环境、版本、提交及工作区状态。使用 `--executable dist/ValorantToxicTamer-v<完整版本号>.exe` 可测量本次打包产物。
+
+探针使用临时数据和离屏界面，不注册全局快捷键、不模拟按键、不请求网络；更新检查会实际创建子进程并加载网络依赖，再返回固定结果。启动耗时从 Python 入口开始，不含进程创建或单文件 EXE 解压时间。这些是隔离环境下的基线，不能替代真实桌面、在线更新和游戏验证。
+
+仅比较相同 Python、Qt、操作系统及源码/打包模式的报告。可选 `--baseline` 对比中，耗时超过基线的 `1.5 倍 + 100ms`，或内存超过 `1.2 倍 + 8 MiB` 时返回失败并记录差异；阈值用于容忍运行环境波动。CI 每次保留报告供比较，不对不同托管机器的绝对内存或耗时强制设限。
 
 ## 许可证
 

@@ -100,8 +100,7 @@ class Application(QObject):
         self.hotkeys.close()
         self.sender.stop()
         if self.window is not None:
-            self.window.timer.stop()
-            self.window.updater.shutdown()
+            self.window.shutdown()
         self.hotkey_window.deleteLater()
         self.tray.hide()
         logger = logging.getLogger("ValorantToxicTamer")

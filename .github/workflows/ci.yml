@@ -1,0 +1,70 @@
+name: Windows checks
+
+on:
+  push:
+    branches: [main, Beta]
+  pull_request:
+    branches: [main, Beta]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: '1'
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-build.txt
+      - name: Prepare project environment
+        run: |
+          python -m venv .venv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
+      - name: Run regression tests
+        run: .\.venv\Scripts\python.exe -B -m unittest discover -s tests -v
+      - name: Check installed dependencies
+        run: .\.venv\Scripts\python.exe -m pip check
+      - name: Record source performance baseline
+        run: .\.venv\Scripts\python.exe -B scripts/performance_baseline.py --output artifacts/performance/source.json
+      - name: Build and check EXE dependencies
+        run: .\scripts\build.ps1
+      - name: Record packaged performance baseline
+        run: |
+          $version = & .\.venv\Scripts\python.exe -B -c 'from valorant_toxic_tamer.app_version import VERSION; print(VERSION)'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\.venv\Scripts\python.exe -B scripts/performance_baseline.py --executable "dist/ValorantToxicTamer-v$version.exe" --output artifacts/performance/packaged.json
+      - name: Upload performance reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-${{ github.sha }}
+          path: artifacts/performance/*.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Upload checked EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe-${{ github.sha }}
+          path: dist/*.exe
+          if-no-files-found: error
+          retention-days: 7

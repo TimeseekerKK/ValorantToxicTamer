@@ -1,5 +1,8 @@
 """Run update networking away from the GUI thread."""
 import threading
+import shutil
+import tempfile
+from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 from PySide6.QtWidgets import QMessageBox
@@ -42,12 +45,19 @@ class UpdateController(QObject):
         def validate(value):
             if not isinstance(value, dict) or set(value) != {"channel"} or value["channel"] not in UPDATE_CHANNELS:
                 raise ValueError("更新渠道设置无效。")
-        self.channel = load_json(self.preferences_path, {"channel": "stable"}, validate)["channel"]
+        self.preferences_error = None
+        try:
+            self.channel = load_json(self.preferences_path, {"channel": "stable"}, validate)["channel"]
+        except ValueError as exc:
+            # Updating is optional: an unreadable preference must not disable the UI.
+            self.channel = "stable"
+            self.preferences_error = str(exc)
 
     def bind_widgets(self):
         window = self.window
         window.update_channel.setCurrentIndex(window.update_channel.findData(self.channel))
         window.update_channel.currentIndexChanged.connect(self.change_channel)
+        window.repair_update_button.clicked.connect(self.repair_preferences)
         self._channel_hint()
 
     def _channel_hint(self):
@@ -55,20 +65,53 @@ class UpdateController(QObject):
             "仅接收正式版；从 Beta 切回时会提示降级。" if self.channel == "stable" else
             "接收正式版和 Beta，选择版本号最高的版本。测试功能可能尚不稳定。")
         self.window.update_channel.setToolTip("选择后自动保存，下次启动保留。")
+        self.window.repair_update_button.setVisible(self.preferences_error is not None)
+        if self.preferences_error:
+            self.window.update_channel_hint.setText(
+                "更新设置无法读取，暂用正式版渠道。原文件已保留；恢复设置或切换渠道时会先备份原文件。")
+            self.window.update_channel_hint.setToolTip(self.preferences_error)
+        else:
+            self.window.update_channel_hint.setToolTip("")
+
+    def _save_preferences(self, channel):
+        backup = None
+        if self.preferences_error and self.preferences_path.exists():
+            # Copy before replacing; a failed backup must leave the source intact.
+            with tempfile.NamedTemporaryFile(dir=self.preferences_path.parent,
+                    prefix="update_settings.invalid-", suffix=".json", delete=False) as stream:
+                backup = Path(stream.name)
+            try:
+                shutil.copyfile(self.preferences_path, backup)
+            except OSError:
+                backup.unlink(missing_ok=True)
+                raise
+        atomic_json(self.preferences_path, {"channel": channel})
+        self.channel = channel
+        self.preferences_error = None
+        self._channel_hint()
+        if backup:
+            self.window.result_label.setText(f"更新设置已恢复，原文件备份：{backup}")
+
+    @Slot()
+    def repair_preferences(self):
+        if self.busy:
+            return
+        try:
+            self._save_preferences(self.channel)
+        except OSError as exc:
+            self.window.error(exc)
 
     @Slot()
     def change_channel(self):
         channel = self.window.update_channel.currentData()
         try:
-            atomic_json(self.preferences_path, {"channel": channel})
+            self._save_preferences(channel)
         except OSError as exc:
             self.window.update_channel.blockSignals(True)
             self.window.update_channel.setCurrentIndex(self.window.update_channel.findData(self.channel))
             self.window.update_channel.blockSignals(False)
             self.window.error(exc)
             return
-        self.channel = channel
-        self._channel_hint()
 
     @Slot()
     def check(self):
@@ -78,6 +121,7 @@ class UpdateController(QObject):
         self.window.update_button.setEnabled(False)
         self.window.update_button.set_busy(True)
         self.window.update_channel.setEnabled(False)
+        self.window.repair_update_button.setEnabled(False)
         self.window.update_button.setText("检查中…")
         self.window.result_label.setText("正在检查更新…")
         channel = self.channel
@@ -97,6 +141,7 @@ class UpdateController(QObject):
         self.window.update_button.setEnabled(True)
         self.window.update_button.set_busy(False)
         self.window.update_channel.setEnabled(True)
+        self.window.repair_update_button.setEnabled(True)
         self.window.update_button.setText("检查更新")
 
     @Slot()
