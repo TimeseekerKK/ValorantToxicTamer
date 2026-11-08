@@ -212,7 +212,8 @@ class MainWindow(QMainWindow):
         self.updater = UpdateController(self)
         self.setWindowTitle(f"ValorantToxicTamer · V{VERSION}")
         self.setWindowIcon(app_icon())
-        self.resize(840, 638)
+        self.resize(1067, 669)
+        self._initial_size_applied = False
         self.setMinimumSize(840, 638)
         self.setStyleSheet(style_for_font_size(config.value["font_size"]))
         self.next_index = -1
@@ -812,6 +813,11 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event):
         super().showEvent(event)
+        if not self._initial_size_applied:
+            # The default size includes the native title bar and window borders.
+            frame_size = self.frameGeometry().size() - self.size()
+            self.resize(QSize(1067, 669) - frame_size)
+            self._initial_size_applied = True
         self.refresh_status()
 
     def hideEvent(self, event):
