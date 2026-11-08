@@ -34,13 +34,17 @@ def prepare_txt_import(path: Path, existing=()) -> ImportPreview:
     if len(lines) > MAX_IMPORT_LINES:
         raise ValueError("单次最多导入 20000 条消息，请拆分后导入。")
     validate_messages(list(lines))
+    return ImportPreview(lines, deduplicate_messages(lines, existing))
+
+
+def deduplicate_messages(messages, existing=()):
     seen = set(existing)
     unique = []
-    for line in lines:
+    for line in messages:
         if line not in seen:
             unique.append(line)
             seen.add(line)
-    return ImportPreview(lines, tuple(unique))
+    return tuple(unique)
 
 
 def validate_messages(messages):

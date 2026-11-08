@@ -327,6 +327,9 @@ class MessageDialog(QDialog):
         layout.addWidget(QLabel("消息内容（单行）"))
         self.input = CutLineEdit()
         self.input.setAccessibleName("消息内容（单行）")
+        # Storage/import validation has no per-message length cap. Do not let
+        # QLineEdit's default 32767 UTF-16 units silently truncate valid text.
+        self.input.setMaxLength(2**31 - 1)
         self.input.setText(text)
         layout.addWidget(self.input)
         hint = QLabel("保存后自动更新列表，循环从第一条开始。" if row is not None

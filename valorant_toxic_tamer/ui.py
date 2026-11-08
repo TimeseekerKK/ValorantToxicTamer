@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (QDialog, QFileDialog, QFormLayout,
     QStyledItemDelegate, QTabWidget, QVBoxLayout, QWidget)
 
 from .config_manager import DEFAULT_CONFIG, FONT_SIZES, HOTKEYS
-from .message_manager import prepare_txt_import
+from .message_manager import deduplicate_messages, prepare_txt_import
 from .app_version import VERSION
 from .tray import app_icon
 from .update_controller import UpdateController
@@ -659,6 +659,8 @@ class MainWindow(QMainWindow):
         self.update_actions()
 
     def change(self, action, row=0):
+        if self.import_worker is not None or self.closing:
+            return
         try:
             self.sender.edit(action)
             self.reload_messages(row)
@@ -675,6 +677,8 @@ class MainWindow(QMainWindow):
             self.change(lambda: self.messages.replace(self.messages.messages + [text]), len(self.messages.messages))
 
     def edit_message(self, *_):
+        if self.import_worker is not None or self.closing:
+            return
         row = self.list_widget.currentRow()
         if row < 0:
             return
@@ -747,24 +751,44 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _import_prepared(self):
-        worker, self.import_worker = self.import_worker, None
+        worker = self.import_worker
         if worker is None:
             return
-        worker.deleteLater()
-        if self.closing:
-            return
-        self.update_actions()
-        if worker.error:
-            self.error(worker.error)
-            self.result_label.setText("导入未完成，现有消息未更改。")
-            return
-        dialog = ImportDialog(self, worker.preview)
-        accepted = dialog.exec() == QDialog.DialogCode.Accepted
-        messages = dialog.selected_messages()
-        dialog.deleteLater()
-        if accepted and messages and not self.closing:
-            self.change(lambda: self.messages.replace(self.messages.messages + list(messages)),
-                        len(self.messages.messages))
+        try:
+            if self.closing:
+                return
+            if worker.error:
+                self.error(worker.error)
+                self.result_label.setText("导入未完成，现有消息未更改。")
+                return
+            # Keep the import guard until the modal preview has closed too.
+            dialog = ImportDialog(self, worker.preview)
+            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+            skip_duplicates = dialog.skip_duplicates.isChecked()
+            dialog.deleteLater()
+        finally:
+            self.import_worker = None
+            worker.deleteLater()
+            self.update_actions()
+        if accepted and not self.closing:
+            try:
+                def append():
+                    # Recompute inside the same edit lock as persistence, using
+                    # all input lines rather than the preview's old unique subset.
+                    incoming = (deduplicate_messages(worker.preview.messages, self.messages.messages)
+                                if skip_duplicates else worker.preview.messages)
+                    if not incoming:
+                        return False
+                    self.messages.replace(self.messages.messages + list(incoming))
+                    return True
+                row = len(self.messages.messages)
+                if self.sender.edit(append):
+                    self.reload_messages(row)
+                    self.result_label.setText("消息已保存，循环从第一条开始。")
+                else:
+                    self.result_label.setText("没有需要追加的新消息，现有消息和发送进度未更改。")
+            except (OSError, ValueError) as exc:
+                self.error(exc)
         else:
             self.result_label.setText("已取消导入，现有消息未更改。")
 

@@ -18,6 +18,7 @@ from valorant_toxic_tamer.config_manager import ConfigManager
 from valorant_toxic_tamer.message_manager import MessageManager, prepare_txt_import
 from valorant_toxic_tamer.sender import Sender
 from valorant_toxic_tamer.ui import ImportDialog, MainWindow
+from valorant_toxic_tamer.ui_theme import MessageDialog
 
 
 class MessageFeatureTests(unittest.TestCase):
@@ -81,6 +82,34 @@ class MessageFeatureTests(unittest.TestCase):
         dialog = self.app.activeModalWidget()
         dialog.input.setText(text)
         dialog.accept()
+
+    def test_imported_long_messages_survive_edit_and_save_without_truncation(self):
+        for text in ("x" * 40000, "汉😀" * 20000):
+            with self.subTest(characters=len(text)):
+                self.source.write_text(text, encoding="utf-8")
+                self.messages.replace([])
+                self.messages.import_txt(self.source)
+                self.window.reload_messages()
+                def confirm(dialog):
+                    self.assertEqual(dialog.input.text(), text)
+                    dialog.input.deselect()
+                    dialog.input.setCursorPosition(len(text.encode("utf-16-le")) // 2)
+                    dialog.input.insert("尾")
+                    return QDialog.DialogCode.Accepted
+                with patch.object(MessageDialog, "exec", confirm):
+                    self.window.edit_message()
+                self.assertEqual(self.messages.messages, [text + "尾"])
+                self.assertEqual(MessageManager(self.messages.path).messages, [text + "尾"])
+
+    def test_add_dialog_preserves_long_pasted_message(self):
+        text = "😀" * 20000
+        def confirm(dialog):
+            dialog.input.setText(text)
+            self.assertEqual(dialog.input.text(), text)
+            return QDialog.DialogCode.Accepted
+        with patch.object(MessageDialog, "exec", confirm):
+            self.window.add_message()
+        self.assertEqual(MessageManager(self.messages.path).messages[-1], text)
 
     def test_no_results_clears_selection_and_clear_search_restores_all(self):
         self.window.search.setText("不存在")
@@ -181,6 +210,57 @@ class MessageFeatureTests(unittest.TestCase):
         self.window.error.assert_called_once()
         self.assertEqual(self.messages.path.read_bytes(), before)
 
+    def test_import_preview_blocks_double_click_changes_and_second_import(self):
+        self.source.write_text("新增", encoding="utf-8")
+        before = self.messages.path.read_bytes()
+        self.messages.advance()
+        observed = {}
+        def confirm(dialog):
+            observed["edit_enabled"] = self.window.edit_button.isEnabled()
+            self.window.list_widget.itemDoubleClicked.emit(self.window.list_widget.item(0))
+            self.window.change(lambda: self.messages.replace(["不应保存"]))
+            self.window.import_txt()
+            observed["file"] = self.messages.path.read_bytes()
+            return QDialog.DialogCode.Rejected
+        with patch.object(ImportDialog, "exec", confirm), \
+                patch.object(MessageDialog, "exec") as edit, \
+                patch("valorant_toxic_tamer.ui.QFileDialog.getOpenFileName", return_value=(str(self.source), "")) as choose:
+            self.window.import_txt()
+            self.wait_until(lambda: self.window.import_worker is None)
+            edit.assert_not_called()
+            choose.assert_called_once()
+        self.assertFalse(observed["edit_enabled"])
+        self.assertEqual(observed["file"], before)
+        self.assertEqual(self.messages.path.read_bytes(), before)
+        self.assertEqual(self.messages.index, 1)
+        self.assertTrue(self.window.edit_button.isEnabled())
+
+    def test_confirm_import_recomputes_duplicates_from_current_messages(self):
+        self.source.write_text("新增\n第一条 Alpha\n新增", encoding="utf-8")
+        def confirm(dialog):
+            dialog.skip_duplicates.setChecked(True)
+            self.messages.replace(["新增", "其他"])
+            return QDialog.DialogCode.Accepted
+        with patch.object(ImportDialog, "exec", confirm):
+            self._import()
+            self.wait_until(lambda: self.window.import_worker is None)
+        self.assertEqual(self.messages.messages, ["新增", "其他", "第一条 Alpha"])
+
+    def test_confirm_import_with_no_new_messages_preserves_file_and_progress(self):
+        self.source.write_text("新增", encoding="utf-8")
+        snapshot = {}
+        def confirm(dialog):
+            dialog.skip_duplicates.setChecked(True)
+            self.messages.replace(["新增", "其他"])
+            self.messages.advance()
+            snapshot["file"] = self.messages.path.read_bytes()
+            return QDialog.DialogCode.Accepted
+        with patch.object(ImportDialog, "exec", confirm):
+            self._import()
+            self.wait_until(lambda: self.window.import_worker is None)
+        self.assertEqual(self.messages.path.read_bytes(), snapshot["file"])
+        self.assertEqual(self.messages.index, 1)
+
     def test_background_parse_keeps_ui_responsive_and_shutdown_does_not_import(self):
         entered, unblock = threading.Event(), threading.Event()
         self.source.write_text("新消息", encoding="utf-8")
@@ -190,7 +270,8 @@ class MessageFeatureTests(unittest.TestCase):
             unblock.wait(3)
             return original(*args)
         with patch("valorant_toxic_tamer.ui.prepare_txt_import", side_effect=slow), \
-                patch.object(ImportDialog, "exec") as dialog:
+                patch.object(ImportDialog, "exec") as dialog, \
+                patch.object(MessageDialog, "exec") as edit:
             self._import()
             try:
                 self.assertTrue(entered.wait(1))
@@ -200,6 +281,11 @@ class MessageFeatureTests(unittest.TestCase):
                 self.assertTrue(ticks)
                 self.assertFalse(self.window.add_button.isEnabled())
                 self.assertFalse(self.window.import_button.isEnabled())
+                before = self.messages.path.read_bytes()
+                self.window.list_widget.itemDoubleClicked.emit(self.window.list_widget.item(0))
+                self.window.change(lambda: self.messages.replace(["不应保存"]))
+                edit.assert_not_called()
+                self.assertEqual(self.messages.path.read_bytes(), before)
             finally:
                 unblock.set()
             self.window.shutdown()
