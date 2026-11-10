@@ -1,4 +1,4 @@
-# ValorantToxicTamer · v1.6.0-beta.2
+# ValorantToxicTamer · v1.6.0
 
 **Valorant反嘴臭工具**。Windows 托盘快捷消息工具，支持自定义消息及队伍、全体聊天快捷发送。目标运行环境为 Windows 10 / 11、Python 3.11、PySide6。
 
@@ -20,7 +20,7 @@
 
 ### 1. 启动程序
 
-如果已有打包好的程序，双击 `ValorantToxicTamer-v<完整版本号>.exe` 即可启动，例如 `ValorantToxicTamer-v1.6.0-beta.2.exe`。正常启动时默认请求管理员权限，请在 Windows 用户账户控制（UAC）提示中选择「是」；拒绝授权则退出。已经以管理员身份运行时直接启动，不重复请求。
+如果已有打包好的程序，双击 `ValorantToxicTamer-v<完整版本号>.exe` 即可启动，例如 `ValorantToxicTamer-v1.6.0.exe`。正常启动时默认请求管理员权限，请在 Windows 用户账户控制（UAC）提示中选择「是」；拒绝授权则退出。已经以管理员身份运行时直接启动，不重复请求。
 
 从源码运行时，先安装 Python 3.11，在项目目录打开 PowerShell，执行：
 
