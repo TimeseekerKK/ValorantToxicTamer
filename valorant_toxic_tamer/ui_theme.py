@@ -33,6 +33,8 @@ QCheckBox::indicator { width: 18px; height: 18px; }
 QCheckBox:focus { outline: 1px solid #96a4b2; }
 QPushButton { background: #23313f; border: 1px solid #4a5d6e; padding: 9px 18px; min-height: 22px; }
 QPushButton:hover { background: #304353; }
+QProgressBar { background: #121c26; border: 1px solid #435364; min-height: 24px; text-align: center; }
+QProgressBar::chunk { background: #89333f; }
 QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; border: 0; }
 QScrollBar:vertical { background: #121c26; width: 7px; margin: 2px 0; }
 QScrollBar::handle:vertical { background: #435364; min-height: 28px; border-radius: 3px; }

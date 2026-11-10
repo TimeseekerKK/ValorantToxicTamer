@@ -57,6 +57,30 @@ class DesignUITests(unittest.TestCase):
         self.assertEqual(self.window.next_index, 1)
         self.assertEqual(self.window.next_label.text(), "第二条")
 
+    def test_download_cancel_and_progress_fit_default_view_at_larger_fonts(self):
+        self.window.tabs.setCurrentIndex(1)
+        scroll = self.window.tabs.widget(1).findChild(QScrollArea)
+        for size in (13, 16):
+            with self.subTest(size=size):
+                self.config.save({**self.config.value, "font_size": size})
+                self.window.apply_font_size()
+                self.window.cancel_update_button.show()
+                self.window.update_progress.show()
+                self.app.processEvents()
+                for control in (self.window.cancel_update_button, self.window.update_progress):
+                    rect = QRect(control.mapTo(scroll.viewport(), QPoint()), control.size())
+                    self.assertTrue(scroll.viewport().rect().contains(rect))
+
+    def test_cooldown_save_does_not_reapply_font_style(self):
+        self.window.tabs.setCurrentIndex(1)
+        with patch.object(self.window, "apply_font_size") as restyle:
+            self.window.cooldown.setText("0.8")
+            self.window.apply_settings()
+            restyle.assert_not_called()
+            self.window.font_size.setCurrentIndex(self.window.font_size.findData(16))
+            self.window.apply_settings()
+            restyle.assert_called_once()
+
     def test_busy_and_empty_states_disable_only_applicable_actions(self):
         self.window.list_widget.setCurrentRow(0)
         self.assertFalse(self.window.up_button.isEnabled())

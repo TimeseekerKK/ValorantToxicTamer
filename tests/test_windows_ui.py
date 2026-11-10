@@ -190,6 +190,21 @@ class WindowsTests(unittest.TestCase):
         hotkeys.unregister()
         self.assertEqual(api.user.UnregisterHotKey.call_count, 2)
 
+    def test_hotkeys_keep_unchanged_registration_and_support_swaps(self):
+        hotkeys, api, _ = self.hotkeys()
+        api.user.RegisterHotKey.reset_mock()
+        self.assertTrue(hotkeys.configure(DEFAULT_CONFIG))
+        api.user.RegisterHotKey.assert_not_called()
+        api.user.UnregisterHotKey.assert_not_called()
+        self.assertTrue(hotkeys.configure({**DEFAULT_CONFIG, "team_hotkey": "F7"}))
+        api.user.UnregisterHotKey.assert_called_once_with(100, 0x5101)
+        api.user.RegisterHotKey.assert_called_once_with(100, 0x5101, 0x4000, 0x76)
+        api.user.RegisterHotKey.reset_mock()
+        api.user.UnregisterHotKey.reset_mock()
+        self.assertTrue(hotkeys.configure({**DEFAULT_CONFIG, "team_hotkey": "F9", "all_hotkey": "F7"}))
+        self.assertEqual(api.user.UnregisterHotKey.call_count, 2)
+        self.assertEqual(hotkeys.registered, {0x5101: "F9", 0x5102: "F7"})
+
     def test_native_filter_discards_stale_requests(self):
         hotkeys, _, callback = self.hotkeys()
         msg = W.MSG(message=0x312, wParam=0x5101, time=1000)
@@ -201,6 +216,7 @@ class WindowsTests(unittest.TestCase):
 
     def test_conflicting_hotkey_status(self):
         hotkeys, api, _ = self.hotkeys()
+        hotkeys.unregister()
         api.user.RegisterHotKey.return_value = 0
         self.assertFalse(hotkeys.configure(DEFAULT_CONFIG))
         self.assertEqual(hotkeys.registered, {})
@@ -214,7 +230,7 @@ class WindowsTests(unittest.TestCase):
         from unittest.mock import patch
         with patch("valorant_toxic_tamer.app.set_autostart") as registry:
             with self.assertRaises(ValueError):
-                Application.save_settings(controller, {**DEFAULT_CONFIG, "autostart": True})
+                Application.save_settings(controller, {**DEFAULT_CONFIG, "autostart": True, "team_hotkey": "F7"})
             registry.assert_not_called()
         controller.config.save.assert_not_called()
 

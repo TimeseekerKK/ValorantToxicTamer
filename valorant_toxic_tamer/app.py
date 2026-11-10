@@ -1,7 +1,7 @@
 import sys
 import logging
 
-from PySide6.QtCore import QLockFile, QObject, Qt, Signal, Slot
+from PySide6.QtCore import QLockFile, QObject, Qt, QTimer, Signal, Slot
 from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon, QWidget
 
 from .config_manager import ConfigManager, data_directory, set_autostart, validate_config
@@ -30,6 +30,10 @@ class Application(QObject):
         self.sender = Sender(self.messages, self.api, self.config.value["cooldown"],
                              self.notifications.message.emit)
         self.window = None
+        self.quitting = False
+        self.quit_timer = QTimer(self)
+        self.quit_timer.setInterval(25)
+        self.quit_timer.timeout.connect(self._finish_quit)
         self.last_message = None
         # Keep the native hotkey handle alive independently of the optional UI.
         self.hotkey_window = QWidget()
@@ -45,6 +49,8 @@ class Application(QObject):
 
     @Slot(str)
     def report(self, message):
+        if self.quitting:
+            return
         logging.getLogger("ValorantToxicTamer").info("status: %s", message)
         self.last_message = message
         visible = self.window is not None and self.window.isVisible()
@@ -54,6 +60,8 @@ class Application(QObject):
             self.tray.showMessage("ValorantToxicTamer", message, QSystemTrayIcon.MessageIcon.Warning)
 
     def reveal(self, page=0):
+        if self.quitting:
+            return
         if self.window is None:
             from .ui import MainWindow
             self.window = MainWindow(self.messages, self.config, self.sender, self.save_settings)
@@ -64,6 +72,8 @@ class Application(QObject):
             self.window.report(self.last_message)
 
     def trigger(self, channel):
+        if self.quitting:
+            return False
         triggered = self.sender.trigger(channel)
         if self.window is not None and self.window.isVisible():
             self.window.refresh_status()
@@ -72,17 +82,22 @@ class Application(QObject):
     def save_settings(self, value):
         validate_config(value)
         previous = self.config.value.copy()
+        changed = {key for key in value if value[key] != previous[key]}
+        if not changed:
+            return
+        hotkeys_changed = bool(changed & {"team_hotkey", "all_hotkey"})
         autostart_changed = value["autostart"] != previous["autostart"]
         autostart_applied = False
         try:
-            if not self.hotkeys.configure(value):
+            if hotkeys_changed and not self.hotkeys.configure(value):
                 raise ValueError("快捷键注册失败：\n" + "\n".join(self.hotkeys.status.values()))
             if autostart_changed:
                 set_autostart(value["autostart"])
                 autostart_applied = True
             self.config.save(value)
         except (OSError, ValueError) as exc:
-            self.hotkeys.configure(previous)
+            if hotkeys_changed:
+                self.hotkeys.configure(previous)
             if self.window is not None:
                 self.window.set_hotkey_status(self.hotkeys.status)
             if autostart_applied:
@@ -91,12 +106,15 @@ class Application(QObject):
                 except OSError as rollback:
                     raise OSError(f"{exc}\n恢复开机启动设置失败：{rollback}") from exc
             raise
-        self.sender.cooldown = value["cooldown"]
-        self.tray.set_font_size(self.config.value["font_size"])
-        if self.window is not None:
+        if "cooldown" in changed:
+            self.sender.cooldown = value["cooldown"]
+        if "font_size" in changed:
+            self.tray.set_font_size(value["font_size"])
+        if hotkeys_changed and self.window is not None:
             self.window.set_hotkey_status(self.hotkeys.status)
 
     def cleanup(self):
+        self.quit_timer.stop()
         self.hotkeys.close()
         self.sender.stop()
         if self.window is not None:
@@ -109,6 +127,27 @@ class Application(QObject):
         self.log_handler.close()
 
     def quit(self):
+        if self.quitting:
+            return
+        self.quitting = True
+        self.sender.cancel.set()
+        if self.window is not None:
+            self.window.closing = True
+            self.window.updater.begin_shutdown()
+            self.window.result_label.setText("正在退出，等待后台任务清理…")
+            self.window.setEnabled(False)
+        self.quit_timer.start()
+        self._finish_quit()
+
+    def _finish_quit(self):
+        # Keep Qt responsive while owned workers cancel and release resources.
+        if self.sender.thread and self.sender.thread.is_alive():
+            return
+        if self.window is not None:
+            workers = (self.window.import_worker, self.window.updater.worker)
+            if any(worker is not None and worker.isRunning() for worker in workers):
+                return
+        self.quit_timer.stop()
         self.app.quit()
 
 

@@ -30,6 +30,7 @@ class UpdateWorker(QThread):
 
 class UpdateController(QObject):
     ready_to_install = Signal()
+    download_progress = Signal(object, object)
 
     def __init__(self, window):
         super().__init__(window)
@@ -40,6 +41,7 @@ class UpdateController(QObject):
         self.closing = False
         self.stage = None
         self.target = None
+        self.download_progress.connect(self._progress)
         # Older official versions ignore this file, so switching back remains compatible.
         self.preferences_path = window.config.path.with_name("update_settings.json")
         def validate(value):
@@ -59,6 +61,23 @@ class UpdateController(QObject):
         window.update_channel.currentIndexChanged.connect(self.change_channel)
         window.repair_update_button.clicked.connect(self.repair_preferences)
         self._channel_hint()
+
+    @Slot(object, object)
+    def _progress(self, received, total):
+        if self.closing or self.cancel.is_set() or self.stage != "download":
+            return
+        percent = received * 100 / total
+        self.window.update_progress.setValue(received * 1000 // total)
+        self.window.update_progress.setFormat(
+            f"{percent:.1f}% · {received / 2**20:.1f} / {total / 2**20:.1f} MiB")
+
+    @Slot()
+    def cancel_update(self):
+        if not self.busy or self.stage not in ("check", "download"):
+            return
+        self.cancel.set()
+        self.window.cancel_update_button.setEnabled(False)
+        self.window.result_label.setText("正在取消更新…")
 
     def _channel_hint(self):
         self.window.update_channel_hint.setText(
@@ -117,7 +136,11 @@ class UpdateController(QObject):
     def check(self):
         if self.busy or self.closing:
             return
+        self.cancel.clear()
         self.busy = True
+        self.window.cancel_update_button.setEnabled(True)
+        self.window.cancel_update_button.show()
+        self.window.update_progress.hide()
         self.window.update_button.setEnabled(False)
         self.window.update_button.set_busy(True)
         self.window.update_channel.setEnabled(False)
@@ -143,6 +166,8 @@ class UpdateController(QObject):
         self.window.update_channel.setEnabled(True)
         self.window.repair_update_button.setEnabled(True)
         self.window.update_button.setText("检查更新")
+        self.window.cancel_update_button.hide()
+        self.window.update_progress.hide()
 
     @Slot()
     def _finished(self):
@@ -151,6 +176,12 @@ class UpdateController(QObject):
         if self.closing:
             if self.stage == "download" and worker.result:
                 worker.result.unlink(missing_ok=True)
+            return
+        if self.cancel.is_set() and self.stage in ("check", "download"):
+            if self.stage == "download" and worker.result:
+                worker.result.unlink(missing_ok=True)
+            self._idle()
+            self.window.result_label.setText("已取消更新。")
             return
         if worker.error:
             self._idle()
@@ -195,11 +226,17 @@ class UpdateController(QObject):
                 return
             self.window.result_label.setText("正在下载更新，请稍候…")
             self.window.update_button.setText("下载中…")
+            self.window.update_progress.setValue(0)
+            self.window.update_progress.setFormat("0.0%")
+            self.window.update_progress.show()
             def download():
-                from .updater import download_release
-                return download_release(release, self.target, self.cancel)
+                from .update_process import download_update
+                return download_update(release, self.target, self.cancel, progress=self.download_progress.emit)
             self._start("download", download)
         elif self.stage == "download":
+            # Cancellation is allowed up to this handoff, never during EXE replacement.
+            self.window.cancel_update_button.hide()
+            self.window.update_progress.hide()
             staged = worker.result
             def prepare():
                 try:
@@ -215,11 +252,14 @@ class UpdateController(QObject):
             self.window.result_label.setText("更新已准备就绪，正在退出并覆盖安装…")
             self.ready_to_install.emit()
 
-    def shutdown(self):
+    def begin_shutdown(self):
         self.closing = True
         if hasattr(self.window, "update_button"):
             self.window.update_button.set_busy(False)
         self.cancel.set()
+
+    def shutdown(self):
+        self.begin_shutdown()
         if self.worker:
             self.worker.wait()
             if self.stage == "download" and self.worker.result:

@@ -18,12 +18,17 @@ class Hotkeys(QAbstractNativeEventFilter):
         app.installNativeEventFilter(self)
 
     def configure(self, config):
-        self.unregister()
+        # Keep unchanged registrations; release all changing keys before swaps.
+        for identifier in tuple(self.registered):
+            if self.registered[identifier] != config[f"{self.IDS[identifier]}_hotkey"]:
+                self.api.user.UnregisterHotKey(self.hwnd, identifier)
+                del self.registered[identifier]
         self.status = {}
         for identifier, channel in self.IDS.items():
             name = config[f"{channel}_hotkey"]
             vk = 0x70 + int(name[1:]) - 1
-            if self.api.user.RegisterHotKey(self.hwnd, identifier, 0x4000, vk):
+            if (self.registered.get(identifier) == name or
+                    self.api.user.RegisterHotKey(self.hwnd, identifier, 0x4000, vk)):
                 self.registered[identifier] = name
                 self.status[channel] = f"{name} · 已注册"
             else:

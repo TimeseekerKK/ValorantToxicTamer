@@ -121,18 +121,21 @@ def latest_release(current=VERSION, *, channel="stable"):
     return Release(tag, url, size, digest)
 
 
-def download_release(release, target, cancel):
+def download_release(release, target, cancel, *, progress=lambda received, total: None, staged_path=None):
     """Stage beside the installed EXE so replacement stays on the same volume."""
     staged = None
     try:
         if cancel.is_set():
             raise ValueError("更新已取消。")
-        with tempfile.NamedTemporaryFile(dir=target.parent, prefix=".vtt-update-",
-                                         suffix=".exe", delete=False) as stream:
+        stream = (Path(staged_path).open("wb") if staged_path is not None else
+                  tempfile.NamedTemporaryFile(dir=target.parent, prefix=".vtt-update-",
+                                              suffix=".exe", delete=False))
+        with stream:
             staged = Path(stream.name)
             request = Request(release.url, headers={"User-Agent": f"ValorantToxicTamer/{VERSION}"})
             digest = hashlib.sha256()
             received = 0
+            progress(0, release.size)
             deadline = time.monotonic() + 600
             with _open_update_url(request) as response:
                 while True:
@@ -148,6 +151,7 @@ def download_release(release, target, cancel):
                         raise ValueError("更新文件大小不符，请重试。")
                     stream.write(chunk)
                     digest.update(chunk)
+                    progress(received, release.size)
             stream.flush()
             os.fsync(stream.fileno())
         if received != release.size:
