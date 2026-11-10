@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import QRect, QSize, Qt, QTimer
+from PySide6.QtCore import QRect, QSize, Qt, QTimer, QThread, Slot
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPen
 from PySide6.QtWidgets import (QDialog, QFileDialog, QFormLayout,
     QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMainWindow,
@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (QDialog, QFileDialog, QFormLayout,
     QStyledItemDelegate, QTabWidget, QVBoxLayout, QWidget)
 
 from .config_manager import DEFAULT_CONFIG, FONT_SIZES, HOTKEYS
+from .message_manager import deduplicate_messages, prepare_txt_import
 from .app_version import VERSION
 from .tray import app_icon
 from .update_controller import UpdateController
@@ -37,15 +38,22 @@ class MessageDelegate(QStyledItemDelegate):
     def __init__(self, window):
         super().__init__(window.list_widget)
         self.window = window
+        self._column_key = None
+        self._column_widths = None
 
     def column_widths(self):
-        metrics = self.window.list_widget.fontMetrics()
         digits = max(2, len(str(self.window.list_widget.count())))
+        key = (self.window.list_widget.font().toString(), digits)
+        if key == self._column_key:
+            return self._column_widths
+        metrics = self.window.list_widget.fontMetrics()
         number = max(36, max(metrics.horizontalAdvance(str(i) * digits) for i in range(10)))
         upcoming_font = QFont(self.window.list_widget.font())
         upcoming_font.setPixelSize(max(8, upcoming_font.pixelSize() - 1))
         upcoming = max(60, QFontMetrics(upcoming_font).horizontalAdvance("下一条"))
-        return number, upcoming
+        self._column_key = key
+        self._column_widths = number, upcoming
+        return self._column_widths
 
     def sizeHint(self, option, index):
         number, upcoming = self.column_widths()
@@ -125,16 +133,87 @@ class WrappingLabel(QLabel):
         self.update_height()
 
 
+class ImportWorker(QThread):
+    def __init__(self, path, existing, parent):
+        super().__init__(parent)
+        self.path, self.existing = path, existing
+        self.preview = None
+        self.error = None
+
+    def run(self):
+        try:
+            self.preview = prepare_txt_import(self.path, self.existing)
+        except Exception as exc:
+            self.error = str(exc)
+
+
+class ImportDialog(QDialog):
+    def __init__(self, parent, preview):
+        super().__init__(parent)
+        self.preview = preview
+        self.setWindowTitle("导入预览")
+        self.setWindowIcon(parent.windowIcon())
+        self.setMinimumWidth(500)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setSpacing(14)
+        layout.addWidget(label("导入预览", "section"))
+        layout.addWidget(label(
+            f"读取到 {len(preview.messages)} 条非空消息，其中 {preview.duplicate_count} 条与现有消息或文件内前面的消息重复。",
+            wrap=True))
+        self.skip_duplicates = TacticalCheckBox("跳过重复消息（按完整内容比较）")
+        self.skip_duplicates.setAccessibleName("跳过重复消息")
+        layout.addWidget(self.skip_duplicates)
+        layout.addWidget(label("前 5 条内容预览", "muted"))
+        self.preview_text = WrappingLabel()
+        self.preview_text.setTextFormat(Qt.TextFormat.PlainText)
+        self.preview_text.setText("\n".join(
+            f"{i + 1}. {text[:100]}{'…' if len(text) > 100 else ''}"
+            for i, text in enumerate(preview.messages[:5])))
+        self.preview_scroll = QScrollArea()
+        self.preview_scroll.setWidgetResizable(True)
+        self.preview_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.preview_scroll.setMinimumHeight(120)
+        self.preview_scroll.setMaximumHeight(220)
+        self.preview_scroll.setWidget(self.preview_text)
+        layout.addWidget(self.preview_scroll)
+        self.summary = label("", wrap=True)
+        layout.addWidget(self.summary)
+        actions = QHBoxLayout()
+        actions.addStretch()
+        cancel = CutButton("取消")
+        cancel.clicked.connect(self.reject)
+        cancel.setDefault(True)
+        self.confirm = CutButton("追加导入", primary=True)
+        self.confirm.clicked.connect(self.accept)
+        actions.addWidget(cancel)
+        actions.addWidget(self.confirm)
+        layout.addLayout(actions)
+        self.skip_duplicates.toggled.connect(self.update_summary)
+        self.update_summary()
+
+    def selected_messages(self):
+        return self.preview.unique_messages if self.skip_duplicates.isChecked() else self.preview.messages
+
+    def update_summary(self):
+        count = len(self.selected_messages())
+        self.summary.setText(f"将追加 {count} 条消息；确认后自动保存，发送循环从第一条开始。")
+        self.confirm.setEnabled(count > 0)
+
+
 class MainWindow(QMainWindow):
     def __init__(self, messages, config, sender, save_settings):
         super().__init__()
         self.messages, self.config, self.sender = messages, config, sender
         self.save_settings = save_settings
         self.settings_loaded = False
+        self.import_worker = None
+        self.closing = False
         self.updater = UpdateController(self)
         self.setWindowTitle(f"ValorantToxicTamer · V{VERSION}")
         self.setWindowIcon(app_icon())
-        self.resize(840, 638)
+        self.resize(1067, 669)
+        self._initial_size_applied = False
         self.setMinimumSize(840, 638)
         self.setStyleSheet(style_for_font_size(config.value["font_size"]))
         self.next_index = -1
@@ -174,6 +253,8 @@ class MainWindow(QMainWindow):
         self.apply_font_size()
         if self.messages.messages:
             self.result_label.setText("就绪 · 在游戏前台使用快捷键，按顺序输入下一条消息。")
+        if self.updater.preferences_error:
+            self.result_label.setText("更新设置无法读取，暂用正式版渠道；可在设置页恢复。消息管理和快捷发送仍可使用。")
 
     def _page_changed(self, page):
         if page == 1:
@@ -255,6 +336,16 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.add_button)
         toolbar.addWidget(self.import_button)
         manage_layout.addLayout(toolbar)
+        self.search = CutLineEdit()
+        self.search.setAccessibleName("搜索消息")
+        self.search.setPlaceholderText("搜索消息内容（不改变发送顺序）")
+        self.search.setClearButtonEnabled(True)
+        self.search_timer = QTimer(self)
+        self.search_timer.setSingleShot(True)
+        self.search_timer.setInterval(150)
+        self.search_timer.timeout.connect(self.filter_messages)
+        self.search.textChanged.connect(lambda: self.search_timer.start())
+        manage_layout.addWidget(self.search)
         manage_layout.addWidget(separator())
         self.message_stack = QStackedWidget()
         self.list_widget = MessageList()
@@ -274,6 +365,9 @@ class MainWindow(QMainWindow):
                                alignment=Qt.AlignmentFlag.AlignHCenter)
         empty_layout.addStretch()
         self.message_stack.addWidget(empty)
+        self.no_matches = label("没有匹配的消息，试试其他关键词。", "muted", True)
+        self.no_matches.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.message_stack.addWidget(self.no_matches)
         manage_layout.addWidget(self.message_stack, 1)
         manage_layout.addWidget(separator())
         buttons = QHBoxLayout()
@@ -387,6 +481,8 @@ class MainWindow(QMainWindow):
         about.addWidget(self.update_channel)
         self.update_channel_hint = label("", "muted", True)
         about.addWidget(self.update_channel_hint)
+        self.repair_update_button = CutButton("恢复更新设置")
+        about.addWidget(self.repair_update_button)
         self.update_button = UpdateButton()
         self.update_button.clicked.connect(lambda: self.updater.check())
         self.updater.bind_widgets()
@@ -474,14 +570,17 @@ class MainWindow(QMainWindow):
         row = self.list_widget.currentRow()
         count = self.list_widget.count()
         with self.sender.lock:
-            idle = not self.sender.busy
+            idle = not self.sender.busy and self.import_worker is None
+        selected = row >= 0 and not self.list_widget.item(row).isHidden()
         self.add_button.setEnabled(idle)
         self.import_button.setEnabled(idle)
-        self.edit_button.setEnabled(idle and row >= 0)
-        self.delete_button.setEnabled(idle and row >= 0)
+        self.edit_button.setEnabled(idle and selected)
+        self.delete_button.setEnabled(idle and selected)
         self.clear_button.setEnabled(idle and count > 0)
-        self.up_button.setEnabled(idle and row > 0)
-        self.down_button.setEnabled(idle and 0 <= row < count - 1)
+        # Reordering a filtered subset would obscure the actual adjacent message.
+        filtered = bool(self.search.text().strip())
+        self.up_button.setEnabled(idle and selected and row > 0 and not filtered)
+        self.down_button.setEnabled(idle and selected and row < count - 1 and not filtered)
         self.export_button.setEnabled(idle and count > 0)
         if self.settings_loaded:
             self.save_button.setEnabled(idle)
@@ -520,20 +619,48 @@ class MainWindow(QMainWindow):
             self.refresh_status()
 
     def reload_messages(self, row=0):
-        self.list_widget.clear()
-        for i, text in enumerate(self.messages.messages):
-            item = QListWidgetItem(f"{i + 1:02d}   {text}")
-            item.setData(Qt.ItemDataRole.UserRole, text)
-            item.setToolTip(text)
-            item.setData(Qt.ItemDataRole.AccessibleTextRole, f"第 {i + 1} 条：{text}")
-            self.list_widget.addItem(item)
-        self.list_widget.setCurrentRow(min(row, len(self.messages.messages) - 1))
-        self.message_stack.setCurrentIndex(0 if self.messages.messages else 1)
-        self.count_label.setText(f"{len(self.messages.messages)} 条")
+        self.list_widget.setUpdatesEnabled(False)
+        blocked = self.list_widget.blockSignals(True)
+        try:
+            self.list_widget.clear()
+            for i, text in enumerate(self.messages.messages):
+                item = QListWidgetItem(f"{i + 1:02d}   {text}")
+                item.setData(Qt.ItemDataRole.UserRole, text)
+                item.setToolTip(text)
+                item.setData(Qt.ItemDataRole.AccessibleTextRole, f"第 {i + 1} 条：{text}")
+                self.list_widget.addItem(item)
+            self.list_widget.setCurrentRow(min(row, len(self.messages.messages) - 1))
+            self.filter_messages()
+        finally:
+            self.list_widget.blockSignals(blocked)
+            self.list_widget.setUpdatesEnabled(True)
         self.refresh_status()
         self.list_widget.viewport().update()
 
+    def filter_messages(self):
+        self.search_timer.stop()
+        query = self.search.text().strip().casefold()
+        visible = []
+        self.list_widget.setUpdatesEnabled(False)
+        try:
+            for row, text in enumerate(self.messages.messages):
+                matches = not query or query in text.casefold()
+                self.list_widget.item(row).setHidden(not matches)
+                if matches:
+                    visible.append(row)
+            current = self.list_widget.currentRow()
+            if current not in visible:
+                self.list_widget.setCurrentRow(visible[0] if visible else -1)
+        finally:
+            self.list_widget.setUpdatesEnabled(True)
+        count = len(self.messages.messages)
+        self.count_label.setText(f"{len(visible)} / {count} 条" if query else f"{count} 条")
+        self.message_stack.setCurrentIndex(1 if not count else 0 if visible else 2)
+        self.update_actions()
+
     def change(self, action, row=0):
+        if self.import_worker is not None or self.closing:
+            return
         try:
             self.sender.edit(action)
             self.reload_messages(row)
@@ -550,6 +677,8 @@ class MainWindow(QMainWindow):
             self.change(lambda: self.messages.replace(self.messages.messages + [text]), len(self.messages.messages))
 
     def edit_message(self, *_):
+        if self.import_worker is not None or self.closing:
+            return
         row = self.list_widget.currentRow()
         if row < 0:
             return
@@ -610,9 +739,66 @@ class MainWindow(QMainWindow):
             self.change(lambda: self.messages.replace(values), target)
 
     def import_txt(self):
+        if self.import_worker is not None or self.closing:
+            return
         path, _ = QFileDialog.getOpenFileName(self, "导入 TXT（追加到列表）", "", "文本文件 (*.txt)")
         if path:
-            self.change(lambda: self.messages.import_txt(Path(path)))
+            self.import_worker = ImportWorker(Path(path), tuple(self.messages.messages), self)
+            self.import_worker.finished.connect(self._import_prepared)
+            self.result_label.setText("正在读取并检查导入文件…")
+            self.update_actions()
+            self.import_worker.start()
+
+    @Slot()
+    def _import_prepared(self):
+        worker = self.import_worker
+        if worker is None:
+            return
+        try:
+            if self.closing:
+                return
+            if worker.error:
+                self.error(worker.error)
+                self.result_label.setText("导入未完成，现有消息未更改。")
+                return
+            # Keep the import guard until the modal preview has closed too.
+            dialog = ImportDialog(self, worker.preview)
+            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+            skip_duplicates = dialog.skip_duplicates.isChecked()
+            dialog.deleteLater()
+        finally:
+            self.import_worker = None
+            worker.deleteLater()
+            self.update_actions()
+        if accepted and not self.closing:
+            try:
+                def append():
+                    # Recompute inside the same edit lock as persistence, using
+                    # all input lines rather than the preview's old unique subset.
+                    incoming = (deduplicate_messages(worker.preview.messages, self.messages.messages)
+                                if skip_duplicates else worker.preview.messages)
+                    if not incoming:
+                        return False
+                    self.messages.replace(self.messages.messages + list(incoming))
+                    return True
+                row = len(self.messages.messages)
+                if self.sender.edit(append):
+                    self.reload_messages(row)
+                    self.result_label.setText("消息已保存，循环从第一条开始。")
+                else:
+                    self.result_label.setText("没有需要追加的新消息，现有消息和发送进度未更改。")
+            except (OSError, ValueError) as exc:
+                self.error(exc)
+        else:
+            self.result_label.setText("已取消导入，现有消息未更改。")
+
+    def shutdown(self):
+        self.closing = True
+        self.timer.stop()
+        self.search_timer.stop()
+        if self.import_worker:
+            self.import_worker.wait()
+        self.updater.shutdown()
 
     def export_txt(self):
         path, _ = QFileDialog.getSaveFileName(self, "导出 TXT", "messages.txt", "文本文件 (*.txt)")
@@ -651,6 +837,11 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event):
         super().showEvent(event)
+        if not self._initial_size_applied:
+            # The default size includes the native title bar and window borders.
+            frame_size = self.frameGeometry().size() - self.size()
+            self.resize(QSize(1067, 669) - frame_size)
+            self._initial_size_applied = True
         self.refresh_status()
 
     def hideEvent(self, event):
