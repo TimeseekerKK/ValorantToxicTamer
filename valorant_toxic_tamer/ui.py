@@ -4,7 +4,7 @@ from PySide6.QtCore import QRect, QSize, Qt, QTimer, QThread, Slot
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPen
 from PySide6.QtWidgets import (QDialog, QFileDialog, QFormLayout,
     QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMainWindow,
-    QMessageBox, QScrollArea, QSizePolicy, QStackedWidget, QStyle,
+    QMessageBox, QProgressBar, QScrollArea, QSizePolicy, QStackedWidget, QStyle,
     QStyledItemDelegate, QTabWidget, QVBoxLayout, QWidget)
 
 from .config_manager import DEFAULT_CONFIG, FONT_SIZES, HOTKEYS
@@ -485,8 +485,19 @@ class MainWindow(QMainWindow):
         about.addWidget(self.repair_update_button)
         self.update_button = UpdateButton()
         self.update_button.clicked.connect(lambda: self.updater.check())
+        self.update_progress = QProgressBar()
+        self.update_progress.setAccessibleName("更新下载进度")
+        self.update_progress.setRange(0, 1000)
+        self.update_progress.hide()
+        self.cancel_update_button = CutButton("取消更新")
+        self.cancel_update_button.clicked.connect(self.updater.cancel_update)
+        self.cancel_update_button.hide()
         self.updater.bind_widgets()
-        about.addWidget(self.update_button)
+        update_actions = QHBoxLayout()
+        update_actions.addWidget(self.update_button, 1)
+        update_actions.addWidget(self.cancel_update_button)
+        about.addLayout(update_actions)
+        about.addWidget(self.update_progress)
         about.addWidget(separator())
         about.addWidget(label("本地数据", "section"))
         path_label = label(str(self.messages.path.parent), "muted", True)
@@ -552,9 +563,11 @@ class MainWindow(QMainWindow):
             value = dict(team_hotkey=self.team_key.currentText(), all_hotkey=self.all_key.currentText(),
                          cooldown=cooldown, start_hidden=self.start_hidden.isChecked(),
                          autostart=self.autostart.isChecked(), font_size=self.font_size.currentData())
+            font_changed = value["font_size"] != self.config.value["font_size"]
             self.sender.edit(lambda: self.save_settings(value))
             self.refresh_status()
-            self.apply_font_size()
+            if font_changed:
+                self.apply_font_size()
             self.result_label.setText("设置已保存。")
             self.settings_changed()
         except (OSError, ValueError) as exc:

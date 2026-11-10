@@ -4,12 +4,15 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtTest import QTest
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from valorant_toxic_tamer.app import Application
@@ -179,3 +182,47 @@ print('cold lifecycle passed')
                                 capture_output=True, text=True, timeout=40)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("cold lifecycle passed", result.stdout)
+
+    def test_quit_keeps_event_loop_running_until_update_worker_stops(self):
+        api = Mock()
+        api.user.RegisterHotKey.return_value = 1
+        with patch("valorant_toxic_tamer.app.WindowsAPI", return_value=api):
+            controller = Application(self.app, self.config.path.parent)
+        entered = threading.Event()
+
+        def lookup(*, channel, cancel):
+            entered.set()
+            cancel.wait(3)
+            time.sleep(0.2)  # Simulate resource cleanup after cancellation.
+            raise ValueError("已取消")
+
+        try:
+            controller.reveal(1)
+            controller.window.error = Mock()
+            ticks = []
+            with patch("valorant_toxic_tamer.update_process.check_for_update", side_effect=lookup), \
+                    patch.object(self.app, "quit") as quit_app:
+                controller.window.update_button.click()
+                self.assertTrue(entered.wait(1))
+                began = time.monotonic()
+                controller.quit()
+                self.assertLess(time.monotonic() - began, 0.1)
+                self.assertTrue(controller.window.updater.cancel.is_set())
+                self.assertFalse(controller.trigger("team"))
+                QTimer.singleShot(0, lambda: ticks.append(True))
+                QTest.qWait(40)
+                self.assertTrue(ticks)
+                quit_app.assert_not_called()
+                deadline = time.monotonic() + 3
+                while not quit_app.called and time.monotonic() < deadline:
+                    QTest.qWait(10)
+                quit_app.assert_called_once()
+                controller.window.error.assert_not_called()
+        finally:
+            self.app.aboutToQuit.disconnect(controller.cleanup)
+            controller.cleanup()
+            controller.window.hide()
+            controller.window.deleteLater()
+            controller.tray.deleteLater()
+            controller.deleteLater()
+            self.app.processEvents()

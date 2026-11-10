@@ -15,6 +15,8 @@ def check(path):
     if "valorant_toxic_tamer/update_install.ps1" not in {name.replace("\\", "/") for name in archive.toc}:
         raise RuntimeError("打包缺少覆盖安装所需的 update_install.ps1。")
     modules = archive.open_embedded_archive("PYZ.pyz").toc
+    if "valorant_toxic_tamer.elevation" not in modules:
+        raise RuntimeError("打包缺少启动时请求管理员权限所需的 elevation 模块。")
     if not {"valorant_toxic_tamer.entrypoint", "valorant_toxic_tamer.update_process",
             "valorant_toxic_tamer.update_protocol", "valorant_toxic_tamer.updater"}.issubset(modules):
         raise RuntimeError("打包缺少独立检查更新进程所需的模块。")
