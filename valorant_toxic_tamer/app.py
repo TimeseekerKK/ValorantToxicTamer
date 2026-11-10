@@ -113,6 +113,14 @@ class Application(QObject):
 
 
 def main():
+    # Diagnostic modes never send keyboard input and need no UAC.
+    diagnostic = len(sys.argv) == 3 and sys.argv[1] in (
+        "--startup-check", "--update-check-smoke")
+    if not diagnostic:
+        from .elevation import ensure_administrator
+        status = ensure_administrator()
+        if status is not None:
+            return status
     app = QApplication(sys.argv)
     app.styleHints().setColorScheme(Qt.ColorScheme.Dark)
     app.setApplicationName("ValorantToxicTamer")
