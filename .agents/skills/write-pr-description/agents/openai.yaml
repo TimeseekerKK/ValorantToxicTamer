@@ -1,0 +1,4 @@
+interface:
+  display_name: "PR 内容规范"
+  short_description: "依据实际改动撰写和审核 PR 标题与正文，准确说明验证情况并遵循仓库模板"
+  default_prompt: "使用 $write-pr-description，根据本次实际改动撰写或审核 PR 标题和正文。"
