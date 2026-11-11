@@ -1,28 +1,65 @@
-# ValorantToxicTamer · v1.6.0-beta.2
+# ValorantToxicTamer
 
-**Valorant反嘴臭工具**。Windows 托盘快捷消息工具，支持自定义消息及队伍、全体聊天快捷发送。目标运行环境为 Windows 10 / 11、Python 3.11、PySide6。
+**Valorant 反嘴臭工具 · Windows 托盘快捷消息助手**
 
-本仓库提供源码，初始消息列表为空，不附带语录库，可自行添加消息或导入个人 TXT 文件。
+把常用消息整理到本地列表，在游戏中按快捷键发送到队伍或全体聊天。支持中文输入、消息搜索、TXT 导入导出，以及正式版 / Beta 双渠道更新。
 
-- **F8**：Enter 打开队伍聊天，输入下一条消息，再按 Enter。
-- **F9**：Shift+Enter 打开全体聊天，释放 Shift 后输入下一条消息，再按 Enter。
-- 共用一个列表、循环索引、发送锁和默认 **500ms** 冷却；冷却从输入流程结束时开始。
-- RegisterHotKey 使用 `MOD_NOREPEAT`；长按不连发，发送中和冷却中的触发直接丢弃。
-- 新进程从第一条开始；本地输入流程发生异常不推进索引。
-- 消息增删改、一键清空列表、上下移动、TXT 追加导入和导出、JSON 自动保存。
-- 默认窗口为 1067 × 669（含标题栏和边框），首次打开时应用；界面字体默认 13 px，支持 9–16 px 调节，保存后生效并在重启后保留；长消息预览可滚动查看全文。
-- 启动默认隐藏到托盘，关闭窗口隐藏到托盘，从托盘菜单退出；默认不开机启动。
-- 托盘启动时延迟创建主窗口，首次打开设置时再创建设置页；检查更新使用临时子进程，结束后释放该进程的网络资源。隐藏窗口和可见空闲状态停止状态轮询，发送及冷却期间按需刷新。
+**运行平台：** Windows 10 / 11　·　**当前源码版本：** `v1.6.0-beta.2`
 
-## 使用
+[下载程序](https://github.com/TimeseekerKK/ValorantToxicTamer/releases) · [快速开始](#快速开始) · [技术栈](#技术栈) · [使用方法](#使用方法) · [项目原理](#项目原理) · [项目结构与开发](#项目结构与开发)
 
-首次使用按以下顺序操作：启动程序 → 双击托盘图标 → 添加或导入消息 → 切回游戏 → 按 F8 / F9 发送。
+> 初始消息列表为空，不附带语录库。首次使用请自行添加消息，或导入个人 TXT 文件。
+
+## 功能一览
+
+| 功能 | 说明 |
+| --- | --- |
+| 双频道快捷发送 | 默认 **F8** 发送到队伍、**F9** 发送到全体；两个频道共用列表，按顺序循环 |
+| 个人消息管理 | 添加、编辑、删除、清空、排序和搜索；长消息可滚动预览，修改自动保存 |
+| TXT 导入导出 | 每行一条消息，支持导入预览、可选去重、备份与迁移 |
+| 托盘常驻 | 默认隐藏到托盘；支持自定义快捷键、字号、发送冷却和开机启动 |
+| 应用内更新 | 可选择正式版或 Beta 渠道，支持下载进度、取消检查 / 下载和覆盖更新 |
+
+## 快速开始
+
+1. 前往 [Releases](https://github.com/TimeseekerKK/ValorantToxicTamer/releases)，选择所需版本，下载附件中的 `ValorantToxicTamer-v<完整版本号>.exe`。
+2. 双击 EXE，在 Windows 管理员权限提示中选择「是」。**打包版无需安装 Python 或依赖。**
+3. 双击任务栏右下角的托盘图标，打开「消息管理」，添加消息或使用「TXT 导入」。
+4. 切回 Valorant，关闭聊天框并松开 Shift / Ctrl / Alt / Win，按 **F8** 或 **F9** 发送。
+
+默认发送冷却为 **0.5 秒**，长按不会连发。关闭主窗口后程序继续在托盘运行；完全退出请右键托盘图标，选择「退出程序」。
+
+## 技术栈
+
+版本号以仓库的 [运行依赖](requirements.txt) 和 [构建依赖](requirements-build.txt) 为准。
+
+| 技术 | 当前版本 / 方式 | 在项目中的用途 |
+| --- | --- | --- |
+| Python | 3.11（开发与 CI 环境） | 应用逻辑、后台任务、文件读写和更新流程 |
+| [PySide6 / Qt for Python](https://doc.qt.io/qtforpython-6/) | `6.12.0` | Qt Widgets 桌面界面、系统托盘、信号槽和原生事件过滤 |
+| Windows API + `ctypes` | Python 标准库调用原生接口 | `RegisterHotKey` 注册全局快捷键，`SendInput` 模拟键盘与 Unicode 文本输入，检查游戏前台窗口并请求 UAC 提权 |
+| JSON + TXT | 本地文件存储 | JSON 保存消息与设置，通过临时文件和 `os.replace` 写入；TXT 用于导入导出 |
+| `urllib` + [truststore](https://truststore.readthedocs.io/) | 标准库 + `0.10.5` | 查询 GitHub Releases、下载更新，使用 Windows 系统证书信任链校验 HTTPS |
+| [PyInstaller](https://pyinstaller.org/en/stable/) + PowerShell | `6.22.3` + 构建 / 更新脚本 | 打包 Windows 单文件 EXE，并执行更新替换与重启 |
+| `unittest` + GitHub Actions | 标准库 + Windows CI | 自动测试、依赖检查、EXE 构建与性能基线报告 |
+
+界面采用 Qt Widgets；消息保存在本机，日常消息管理和快捷发送不需要部署后端或数据库。检查和下载更新时才访问 GitHub。
+
+## 使用方法
+
+### 运行环境
+
+| 使用方式 | 需要准备 |
+| --- | --- |
+| 下载 EXE 直接运行 | Windows 10 / 11，允许启动时的管理员权限请求 |
+| 从源码运行 | Windows 10 / 11、Python 3.11，以及 `requirements.txt` 中的依赖 |
+| 构建 EXE | 在源码环境中额外安装 `requirements-build.txt`，通过 PowerShell 执行构建脚本 |
 
 ### 1. 启动程序
 
-如果已有打包好的程序，双击 `ValorantToxicTamer-v<完整版本号>.exe` 即可启动，例如 `ValorantToxicTamer-v1.6.0-beta.2.exe`。正常启动时默认请求管理员权限，请在 Windows 用户账户控制（UAC）提示中选择「是」；拒绝授权则退出。已经以管理员身份运行时直接启动，不重复请求。
+**使用打包版：** 在 [Releases](https://github.com/TimeseekerKK/ValorantToxicTamer/releases) 下载所需版本的 EXE 并双击启动。正常启动时默认请求管理员权限，请在 Windows 用户账户控制（UAC）提示中选择「是」；拒绝授权则退出。已经以管理员身份运行时直接启动，不重复请求。
 
-从源码运行时，先安装 Python 3.11，在项目目录打开 PowerShell，执行：
+**从源码运行：** 先下载并解压本仓库源码，安装 Python 3.11，然后在包含 `main.py` 的项目根目录打开 PowerShell，执行：
 
 ```powershell
 py -3.11 -m venv .venv
@@ -82,6 +119,8 @@ py -3.11 -m venv .venv
 | 启动后隐藏到系统托盘 | 默认勾选；取消后，下次启动会显示主窗口 |
 | 随 Windows 登录自动启动 | 默认关闭，按需勾选并保存；登录启动时也需确认管理员权限请求；移动程序位置后需重新设置 |
 
+主窗口默认大小为 1067 × 669（含标题栏和边框），首次打开时应用。长消息预览支持滚动查看全文。
+
 关闭主窗口会隐藏到托盘，程序继续运行。需要完全退出时，右键托盘图标，选择 **退出程序**。
 
 保存设置时只应用发生变化的项目；仅调整字号、冷却或启动选项时保留现有快捷键注册。未修改设置时，不重复写入配置或重绘字号。
@@ -124,6 +163,8 @@ py -3.11 -m venv .venv
 ## 项目原理
 
 程序通过 Windows 全局快捷键接收操作，再向前台游戏窗口模拟键盘输入。消息来自用户维护的本地列表，按顺序循环使用；程序不分析聊天内容，也不自动生成回复。
+
+托盘启动时延迟创建主窗口，首次打开设置时再创建设置页；检查更新使用临时子进程，结束后释放其网络资源。隐藏窗口和可见空闲状态停止状态轮询，发送及冷却期间按需刷新。
 
 ### 从快捷键到消息发送
 
@@ -195,7 +236,7 @@ ValorantToxicTamer/
 .\scripts\build.ps1
 ```
 
-打包产物位于 `dist/ValorantToxicTamer-v<完整版本号>.exe`，例如 `dist/ValorantToxicTamer-v1.5.0.exe`。文件名与打包依赖检查路径均由同一份 `VERSION` 自动生成，无需手动改名。
+打包产物位于 `dist/ValorantToxicTamer-v<完整版本号>.exe`，例如 `dist/ValorantToxicTamer-v1.6.0-beta.2.exe`。文件名与打包依赖检查路径均由 `valorant_toxic_tamer/app_version.py` 中的 `VERSION` 自动生成，无需手动改名。
 
 源码启动仍使用 `main.py`，也支持 `.\.venv\Scripts\python.exe -m valorant_toxic_tamer`。应用内部使用包内相对导入，测试和辅助工具通过 `valorant_toxic_tamer` 导入模块。
 
