@@ -48,8 +48,9 @@ with tempfile.TemporaryDirectory(dir=root / "tests") as directory:
     controller.window.deleteLater()
     app.processEvents()
 
-(root / "artifacts").mkdir(exist_ok=True)
-(root / "artifacts" / "native-smoke.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+output = root / "artifacts" / "checks"
+output.mkdir(parents=True, exist_ok=True)
+(output / "native-smoke.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 print(json.dumps(result, ensure_ascii=False, indent=2))
 if not all(value for value in result.values() if isinstance(value, bool)):
     raise SystemExit(1)

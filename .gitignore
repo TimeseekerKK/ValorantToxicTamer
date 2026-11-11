@@ -6,6 +6,8 @@ dist/
 *.spec
 /data/
 /artifacts/
+/.tools/
+/scripts/local/
 /LICENSE.draft.md
 /docs/LICENSE.draft.md
 /VALORANT_反嘴臭语录.txt

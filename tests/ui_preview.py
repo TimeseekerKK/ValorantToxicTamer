@@ -27,7 +27,7 @@ class PreviewWindow(MainWindow):
 
 def main():
     root = Path(__file__).resolve().parents[1]
-    output = root / "artifacts" / "ui-redesign"
+    output = root / "artifacts" / "screenshots" / "ui-redesign"
     output.mkdir(parents=True, exist_ok=True)
     app = QApplication([])
     app.styleHints().setColorScheme(Qt.ColorScheme.Dark)
