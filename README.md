@@ -4,7 +4,7 @@
 
 把常用消息整理到本地列表，在游戏中按快捷键发送到队伍或全体聊天。支持中文输入、消息搜索、TXT 导入导出，以及正式版 / Beta 双渠道更新。
 
-**运行平台：** Windows 10 / 11　·　**当前源码版本：** `v1.6.0-beta.2`
+**运行平台：** Windows 10 / 11　·　**当前源码版本：** `v1.6.0`
 
 [下载程序](https://github.com/TimeseekerKK/ValorantToxicTamer/releases) · [快速开始](#快速开始) · [技术栈](#技术栈) · [使用方法](#使用方法) · [项目原理](#项目原理) · [项目结构与开发](#项目结构与开发)
 
@@ -236,7 +236,7 @@ ValorantToxicTamer/
 .\scripts\build.ps1
 ```
 
-打包产物位于 `dist/ValorantToxicTamer-v<完整版本号>.exe`，例如 `dist/ValorantToxicTamer-v1.6.0-beta.2.exe`。文件名与打包依赖检查路径均由 `valorant_toxic_tamer/app_version.py` 中的 `VERSION` 自动生成，无需手动改名。
+打包产物位于 `dist/ValorantToxicTamer-v<完整版本号>.exe`，例如 `dist/ValorantToxicTamer-v1.6.0.exe`。文件名与打包依赖检查路径均由 `valorant_toxic_tamer/app_version.py` 中的 `VERSION` 自动生成，无需手动改名。
 
 源码启动仍使用 `main.py`，也支持 `.\.venv\Scripts\python.exe -m valorant_toxic_tamer`。应用内部使用包内相对导入，测试和辅助工具通过 `valorant_toxic_tamer` 导入模块。
 
