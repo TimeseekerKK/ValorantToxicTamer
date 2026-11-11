@@ -1,65 +1,133 @@
-# ValorantToxicTamer 自定义使用许可证
+# PolyForm Noncommercial License 1.0.0
 
-版本：1.0
+<https://polyformproject.org/licenses/noncommercial/1.0.0>
 
-Copyright (c) 2026 TimeseekerKK. 保留所有未明确授予的权利。
+## Acceptance
 
-## 1. 适用范围
+In order to get any license under these terms, you must agree
+to them as both strict obligations and conditions to all
+your licenses.
 
-本许可证适用于版权人有权授权的 ValorantToxicTamer 原创源代码、文档、语录及其他项目材料，以及由这些材料生成的软件。第三方材料、依赖库及其组成部分适用各自许可证，不因包含在本项目中而改用本许可证。
+## Copyright License
 
-本许可证是自定义限制性许可证，不是 GitHub 提供的标准许可证，也不是开源许可证。
+The licensor grants you a copyright license for the
+software to do everything you might do with the software
+that would otherwise infringe the licensor's copyright
+in it for any permitted purpose.  However, you may
+only distribute the software according to [Distribution
+License](#distribution-license) and make changes or new works
+based on the software according to [Changes and New Works
+License](#changes-and-new-works-license).
 
-## 2. 允许的使用
+## Distribution License
 
-在遵守本许可证全部条件的前提下，版权人允许使用者为非商业目的阅读、下载、运行、原样复制和原样分发本项目。
+The licensor grants you an additional copyright license
+to distribute copies of the software.  Your license
+to distribute covers distributing the software with
+changes and new works permitted by [Changes and New Works
+License](#changes-and-new-works-license).
 
-允许按项目原有构建流程，为运行未经修改的项目进行编译和打包，但不得借此改变项目代码、功能、品牌或署名。分发构建产物时，还须独立履行所包含第三方组件的许可证义务。
+## Notices
 
-## 3. 禁止商用
+You must ensure that anyone who gets a copy of any part of
+the software from you also gets a copy of these terms or the
+URL for them above, as well as copies of any plain-text lines
+beginning with `Required Notice:` that the licensor provided
+with the software.  For example:
 
-未经版权人事先书面许可，不得将本项目全部或部分用于主要以获得商业利益、商业优势或金钱回报为目的的活动，包括但不限于：销售或付费分发软件、收费代装或配置、提供收费服务、以广告或付费会员方式获利、嵌入商业产品、用于企业经营或商业服务。
+> Required Notice: Copyright Yoyodyne, Inc. (http://example.com)
 
-免费提供软件不当然构成非商业使用；作为商业推广、引流或其他商业活动组成部分的使用，同样不在本许可证的授权范围内。
+## Changes and New Works License
 
-## 4. 禁止二次修改和衍生创作
+The licensor grants you an additional copyright license to
+make changes and new works based on the software for any
+permitted purpose.
 
-未经版权人事先书面许可，不得修改、改编、移植、翻译本项目材料，不得提取或复用其中代码、语录或其他受保护表达以制作衍生作品，也不得分发、发布或提供修改版本。
+## Patent License
 
-此限制同时适用于私下修改和公开发布，并非仅禁止传播修改版本。不得通过更换名称、图标、署名或界面等方式将本项目重新包装为其他项目。
+The licensor grants you a patent license for the software that
+covers patent claims the licensor can license, or becomes able
+to license, that you would infringe by using the software.
 
-通过程序原有功能编辑个人消息列表、导入或导出个人文本、调整快捷键及其他用户设置，属于正常使用，不属于本条所禁止的二次修改。该许可不授予修改原项目随附语录文件后再分发的权利。
+## Noncommercial Purposes
 
-## 5. 保留署名和来源
+Any noncommercial purpose is a permitted purpose.
 
-任何获准复制或分发的项目材料，必须保留已有的作者署名、版权声明、完整许可证和来源信息；不得删除、隐藏、替换署名，或将本项目宣称为本人或其他主体的原创成果。
+## Personal Uses
 
-署名信息：TimeseekerKK。
+Personal use for research, experiment, and testing for
+the benefit of public knowledge, personal study, private
+entertainment, hobby projects, amateur pursuits, or religious
+observance, without any anticipated commercial application,
+is use for a permitted purpose.
 
-项目名称：ValorantToxicTamer。
+## Noncommercial Organizations
 
-项目来源：https://github.com/TimeseekerKK/ValorantToxicTamer
+Use by any charitable organization, educational institution,
+public research organization, public safety or health
+organization, environmental protection organization,
+or government institution is use for a permitted purpose
+regardless of the source of funding or obligations resulting
+from the funding.
 
-分发时，应在随附文档或分发页面的明显位置提供上述署名和来源，以及本许可证全文。不得暗示版权人为使用者、分发者或其产品提供认可或背书。
+## Fair Use
 
-## 6. 平台条款及保留权利
+You may have "fair use" rights for the software under the
+law. These terms do not limit them.
 
-本许可证不限制适用法律明确保留且不得排除的权利，也不限制第三方许可证直接授予使用者的权利。
+## No Other Rights
 
-项目在 GitHub 等平台公开托管时，不排除版权人依据相应平台服务条款已经授予平台和用户的查看、展示、平台内 Fork 等权利。平台提供 Fork 功能本身不意味着版权人另行允许商业使用、二次修改或衍生创作。
+These terms do not allow you to sublicense or transfer any of
+your licenses to anyone else, or prevent the licensor from
+granting licenses to anyone else.  These terms do not imply
+any other licenses.
 
-除本许可证明确授予的权利外，其他权利均予保留；本许可证不授予商标许可，也不授予版权人或其他权利人的专利许可。
+## Patent Defense
 
-## 7. 额外授权
+If you make any written claim that the software infringes or
+contributes to infringement of any patent, your patent license
+for the software granted under these terms ends immediately. If
+your company makes such a claim, your patent license ends
+immediately for work on behalf of your company.
 
-超出本许可证范围的使用，须在实施前取得相关版权人的单独书面许可。可通过项目仓库联系版权人申请授权；提出申请不代表获得许可。
+## Violations
 
-## 8. 违约及终止
+The first time you are notified in writing that you have
+violated any of these terms, or done anything with the software
+not covered by your licenses, your licenses can nonetheless
+continue if you come into full compliance with these terms,
+and take practical steps to correct past violations, within
+32 days of receiving notice.  Otherwise, all your licenses
+end immediately.
 
-违反本许可证条件时，本许可证授予违约使用者的权利立即终止。违约使用者应停止相关使用和分发；停止违约不免除此前行为可能产生的责任。恢复授权须取得版权人的书面许可，但适用法律另有规定的除外。
+## No Liability
 
-## 9. 免责声明
+***As far as the law allows, the software comes as is, without
+any warranty or condition, and the licensor will not be liable
+to you for any damages arising out of these terms or the use
+or nature of the software, under any kind of legal claim.***
 
-在适用法律允许的范围内，本项目按现状提供，不作任何明示或默示保证，包括适销性、特定用途适用性及不侵权保证。版权人不对因使用或无法使用本项目产生的损失承担责任，但适用法律不允许排除或限制的责任除外。
+## Definitions
 
-本许可证部分条款被认定无效或不可执行的，不影响其余条款在适用法律允许范围内的效力。
+The **licensor** is the individual or entity offering these
+terms, and the **software** is the software the licensor makes
+available under these terms.
+
+**You** refers to the individual or entity agreeing to these
+terms.
+
+**Your company** is any legal entity, sole proprietorship,
+or other kind of organization that you work for, plus all
+organizations that have control over, are under the control of,
+or are under common control with that organization.  **Control**
+means ownership of substantially all the assets of an entity,
+or the power to direct its management and policies by vote,
+contract, or otherwise.  Control can be direct or indirect.
+
+**Your licenses** are all the licenses granted to you for the
+software under these terms.
+
+**Use** means anything you do with the software requiring one
+of your licenses.
+
+Required Notice: Copyright (c) 2026 TimeseekerKK (https://github.com/TimeseekerKK/ValorantToxicTamer)
