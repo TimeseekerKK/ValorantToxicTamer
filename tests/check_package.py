@@ -14,6 +14,8 @@ def check(path):
         raise RuntimeError(f"打包混入了可能与 Windows ICU 冲突的 DLL：{collisions}")
     if "valorant_toxic_tamer/update_install.ps1" not in {name.replace("\\", "/") for name in archive.toc}:
         raise RuntimeError("打包缺少覆盖安装所需的 update_install.ps1。")
+    if "valorant_toxic_tamer/assets/app.ico" not in {name.replace("\\", "/") for name in archive.toc}:
+        raise RuntimeError("打包缺少窗口和系统托盘所需的 app.ico。")
     modules = archive.open_embedded_archive("PYZ.pyz").toc
     if "valorant_toxic_tamer.elevation" not in modules:
         raise RuntimeError("打包缺少启动时请求管理员权限所需的 elevation 模块。")

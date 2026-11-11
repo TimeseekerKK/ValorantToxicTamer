@@ -20,8 +20,9 @@ try {
     $appName = "ValorantToxicTamer-v$($appVersion.Trim())"
     $outputPath = Join-Path $projectRoot "dist\$appName.exe"
     $updateHelper = Join-Path $projectRoot 'valorant_toxic_tamer\update_install.ps1'
+    $appIcon = Join-Path $projectRoot 'valorant_toxic_tamer\assets\app.ico'
     $entryPoint = Join-Path $projectRoot 'main.py'
-    & $pythonPath -m PyInstaller --clean --noconfirm --onefile --windowed --specpath build --add-data "${updateHelper};valorant_toxic_tamer" --name $appName $entryPoint
+    & $pythonPath -m PyInstaller --clean --noconfirm --onefile --windowed --specpath build --icon $appIcon --add-data "${appIcon};valorant_toxic_tamer/assets" --add-data "${updateHelper};valorant_toxic_tamer" --name $appName $entryPoint
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller 打包失败。' }
     & $pythonPath tests/check_package.py $outputPath
     if ($LASTEXITCODE -ne 0) { throw '打包依赖检查失败，不能分发此 EXE。' }

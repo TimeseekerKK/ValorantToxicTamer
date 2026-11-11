@@ -1,5 +1,6 @@
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QPolygon
-from PySide6.QtCore import QPoint
+from pathlib import Path
+
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
 
@@ -12,16 +13,7 @@ QMenu::separator { height: 1px; background: #344454; margin: 5px 8px; }
 
 
 def app_icon():
-    pixmap = QPixmap(64, 64)
-    pixmap.fill(QColor("#101b29"))
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setPen(QColor("#ff5364"))
-    painter.setBrush(QColor("#ff5364"))
-    painter.drawPolygon(QPolygon([QPoint(12, 13), QPoint(31, 40), QPoint(52, 13),
-                                  QPoint(52, 34), QPoint(32, 54), QPoint(12, 34)]))
-    painter.end()
-    return QIcon(pixmap)
+    return QIcon(str(Path(__file__).with_name("assets") / "app.ico"))
 
 
 class Tray(QSystemTrayIcon):
