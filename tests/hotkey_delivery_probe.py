@@ -48,7 +48,8 @@ QTimer.singleShot(400, app.quit)
 app.exec()
 hotkeys.close()
 result = {"events": observed, "callbacks": received, "passed": received == ["team", "all"]}
-output = Path(__file__).resolve().parents[1] / "artifacts" / "hotkey-delivery.json"
+output = Path(__file__).resolve().parents[1] / "artifacts" / "checks" / "hotkey-delivery.json"
+output.parent.mkdir(parents=True, exist_ok=True)
 output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 print(json.dumps(result, indent=2))
 raise SystemExit(0 if result["passed"] else 1)

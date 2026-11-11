@@ -174,15 +174,18 @@ ValorantToxicTamer/
 │   ├── hotkey.py / sender.py  # 快捷键和发送流程
 │   ├── win32_api.py           # Windows 接口
 │   └── ...                    # 托盘、更新、日志和版本等模块
-├── scripts/                   # 构建脚本
+├── scripts/                   # 构建、性能检查脚本及本地辅助脚本
 ├── tests/                     # 自动测试、原生检查和预览工具
 ├── requirements.txt           # 运行依赖
 ├── requirements-build.txt     # 构建依赖
 ├── data/                      # 源码运行数据与本地个人文件（不提交）
-├── artifacts/                 # 检查报告和截图（不提交）
+├── artifacts/                 # 按用途分类的检查报告、截图和发布记录（不提交）
+├── .tools/                    # 本地便携开发工具（不提交）
 ├── build/                     # 构建中间文件和生成的 .spec（不提交）
 └── dist/                      # 打包产物（不提交）
 ```
+
+本地报告分类、辅助脚本和历史记录的存放约定见 [本地产物管理](docs/local-artifacts.md)。
 
 在项目根目录执行自动测试和构建：
 

@@ -337,8 +337,8 @@ class WindowsTests(unittest.TestCase):
                 window.move(-1)
                 self.assertEqual(messages.messages[0], "谢谢队友，打得漂亮。")
                 self.assertEqual(MessageManager(messages.path).messages, messages.messages)
-                output = Path(__file__).resolve().parents[1] / "artifacts"
-                output.mkdir(exist_ok=True)
+                output = Path(__file__).resolve().parents[1] / "artifacts" / "screenshots"
+                output.mkdir(parents=True, exist_ok=True)
                 self.assertTrue(window.grab().save(str(output / "main-window.png")))
                 window.tabs.setCurrentIndex(1)
                 self.app.processEvents()
