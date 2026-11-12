@@ -310,7 +310,7 @@ class CutTabBar(QTabBar):
 
 
 class MessageDialog(QDialog):
-    def __init__(self, parent, title, text="", row=None):
+    def __init__(self, parent, title, text="", row=None, *, field_label="消息内容（单行）", hint=None):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setWindowIcon(parent.windowIcon())
@@ -326,18 +326,18 @@ class MessageDialog(QDialog):
             number = QLabel(f"第 {row + 1:02d} 条")
             number.setObjectName("muted")
             layout.addWidget(number)
-        layout.addWidget(QLabel("消息内容（单行）"))
+        layout.addWidget(QLabel(field_label))
         self.input = CutLineEdit()
-        self.input.setAccessibleName("消息内容（单行）")
+        self.input.setAccessibleName(field_label)
         # Storage/import validation has no per-message length cap. Do not let
         # QLineEdit's default 32767 UTF-16 units silently truncate valid text.
         self.input.setMaxLength(2**31 - 1)
         self.input.setText(text)
         layout.addWidget(self.input)
-        hint = QLabel("保存后自动更新列表，循环从第一条开始。" if row is not None
-                      else "添加后加入列表末尾，循环从第一条开始。")
-        hint.setObjectName("muted")
-        layout.addWidget(hint)
+        hint_label = QLabel(hint or "保存后自动更新列表，受影响类别和全部消息从第一条开始。")
+        hint_label.setWordWrap(True)
+        hint_label.setObjectName("muted")
+        layout.addWidget(hint_label)
         actions = QHBoxLayout()
         actions.addStretch()
         cancel = CutButton("取消")

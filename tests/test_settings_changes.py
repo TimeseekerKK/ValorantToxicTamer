@@ -27,7 +27,8 @@ class SettingsChangesTests(unittest.TestCase):
         self.controller.tray.set_font_size.assert_not_called()
 
     def test_independent_fields_do_not_reregister_hotkeys(self):
-        for key, value in (("font_size", 16), ("cooldown", 0.8), ("start_hidden", False), ("autostart", True)):
+        for key, value in (("font_size", 16), ("cooldown", 0.8), ("start_hidden", False),
+                           ("autostart", True), ("category_mode", "alternating")):
             with self.subTest(key=key), patch("valorant_toxic_tamer.app.set_autostart") as registry:
                 self.controller.tray.set_font_size.reset_mock()
                 Application.save_settings(self.controller, {**self.config.value, key: value})
@@ -37,6 +38,8 @@ class SettingsChangesTests(unittest.TestCase):
                 self.assertEqual(self.controller.tray.set_font_size.call_count, int(key == "font_size"))
                 if key == "cooldown":
                     self.assertEqual(self.controller.sender.cooldown, value)
+                if key == "category_mode":
+                    self.controller.messages.set_mode.assert_called_once_with(value)
 
     def test_failed_autostart_save_rolls_back_only_registry(self):
         previous = self.config.value.copy()
@@ -50,11 +53,13 @@ class SettingsChangesTests(unittest.TestCase):
 
     def test_failed_save_restores_changed_hotkeys_and_preserves_runtime(self):
         previous = self.config.value.copy()
-        value = {**previous, "team_hotkey": "F7", "font_size": 16, "cooldown": 0.8}
+        value = {**previous, "team_hotkey": "F7", "font_size": 16, "cooldown": 0.8,
+                 "category_mode": "alternating"}
         with patch.object(self.config, "save", side_effect=OSError("disk full")):
             with self.assertRaises(OSError):
                 Application.save_settings(self.controller, value)
         self.assertEqual([call.args[0] for call in self.controller.hotkeys.configure.call_args_list],
                          [value, previous])
         self.controller.tray.set_font_size.assert_not_called()
+        self.controller.messages.set_mode.assert_not_called()
         self.assertEqual(self.controller.sender.cooldown, previous["cooldown"])

@@ -1,4 +1,4 @@
-"""One shared index, lock and completion-based cooldown for both channels."""
+"""Both channels share the selected categories, lock and completion-based cooldown."""
 import threading
 import time
 import logging
@@ -27,7 +27,7 @@ class Sender:
             if channel not in ("team", "all"):
                 return False
             if not self.messages.current:
-                self.notify("消息列表为空，请先添加消息。")
+                self.notify("当前发送范围没有消息，请勾选类别或添加消息。")
                 return False
             target = self.api.target()
             if not target:

@@ -24,6 +24,7 @@ class Application(QObject):
         self.app = app
         self.config = ConfigManager(directory / "config.json")
         self.messages = MessageManager(directory / "messages.json")
+        self.messages.set_mode(self.config.value["category_mode"])
         self.log_handler = configure_logging(directory)
         self.api = WindowsAPI()
         self.notifications = Notifications()
@@ -108,6 +109,8 @@ class Application(QObject):
             raise
         if "cooldown" in changed:
             self.sender.cooldown = value["cooldown"]
+        if "category_mode" in changed:
+            self.messages.set_mode(value["category_mode"])
         if "font_size" in changed:
             self.tray.set_font_size(value["font_size"])
         if hotkeys_changed and self.window is not None:
