@@ -3,9 +3,9 @@ from pathlib import Path
 from PySide6.QtCore import QRect, QSize, Qt, QTimer, QThread, Slot
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPen
 from PySide6.QtWidgets import (QDialog, QFileDialog, QFormLayout,
-    QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMainWindow,
+    QFrame, QHBoxLayout, QHeaderView, QLabel, QListWidget, QListWidgetItem, QMainWindow,
     QMessageBox, QProgressBar, QScrollArea, QSizePolicy, QStackedWidget, QStyle,
-    QStyledItemDelegate, QTabWidget, QVBoxLayout, QWidget)
+    QStyledItemDelegate, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
 
 from .config_manager import DEFAULT_CONFIG, FONT_SIZES, HOTKEYS
 from .message_manager import (ALL_CATEGORY, UNCATEGORIZED, CATEGORY_MODES,
@@ -159,6 +159,9 @@ class ImportDialog(QDialog):
         layout.setContentsMargins(24, 22, 24, 22)
         layout.setSpacing(14)
         layout.addWidget(label("导入预览", "section"))
+        self.destination_label = label("", wrap=True)
+        self.destination_label.hide()
+        layout.addWidget(self.destination_label)
         layout.addWidget(label(
             f"读取到 {len(preview.messages)} 条非空消息，其中 {preview.duplicate_count} 条与现有消息或文件内前面的消息重复。",
             wrap=True))
@@ -202,6 +205,162 @@ class ImportDialog(QDialog):
         self.confirm.setEnabled(count > 0)
 
 
+class CategoryManagerDialog(QDialog):
+    """Category operations are kept away from message editing controls."""
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("管理类别")
+        self.setWindowIcon(window.windowIcon())
+        self.setStyleSheet(window.styleSheet())
+        self.setMinimumSize(620, 480)
+        self.resize(720, 580)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setSpacing(12)
+        layout.addWidget(label("管理类别", "section"))
+        layout.addWidget(label("在这里整理类别。添加、编辑消息请回到消息管理。", "muted", True))
+        self.table = QTableWidget(0, 3)
+        self.table.setAccessibleName("类别名称、消息数量和类别操作")
+        self.table.setHorizontalHeaderLabels(["类别名称", "消息数量", "操作"])
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.table.setShowGrid(False)
+        self.table.verticalHeader().hide()
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self.table.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.table.setStyleSheet("""
+            QTableWidget { background: #16232f; border: 1px solid #435364; }
+            QTableWidget::item { padding: 8px; border-bottom: 1px solid #30404f; }
+            QHeaderView::section { background: #2b3e50; color: #edf2f6; border: 0; padding: 10px; }
+        """)
+        layout.addWidget(self.table, 1)
+        layout.addWidget(separator())
+        new_row = QHBoxLayout()
+        caption = label("新类别名称")
+        self.name_input = CutLineEdit()
+        self.name_input.setAccessibleName("新类别名称")
+        self.name_input.setMaxLength(40)
+        self.name_input.setPlaceholderText("输入类别名称，最多 40 个字符")
+        caption.setBuddy(self.name_input)
+        new_row.addWidget(caption)
+        new_row.addWidget(self.name_input, 1)
+        self.create_button = CutButton("新建类别", primary=True)
+        self.create_button.clicked.connect(self.create_category)
+        self.create_button.setDefault(True)
+        new_row.addWidget(self.create_button)
+        layout.addLayout(new_row)
+        self.status_label = label("删除类别后，其中的消息将移到“未分类”，不会删除消息。", "muted", True)
+        layout.addWidget(self.status_label)
+        footer = QHBoxLayout()
+        footer.addStretch()
+        self.done_button = CutButton("完成")
+        self.done_button.clicked.connect(self.accept)
+        footer.addWidget(self.done_button)
+        layout.addLayout(footer)
+        self.reload_categories()
+
+    def reload_categories(self):
+        manager = self.window.messages
+        categories = [{"id": ALL_CATEGORY, "name": "全部消息"}] + manager.categories
+        self.action_buttons = []
+        self.table.setRowCount(0)
+        self.table.setRowCount(len(categories))
+        action_width = 0
+        for row, category in enumerate(categories):
+            cid = category["id"]
+            name = QTableWidgetItem(category["name"])
+            name.setData(Qt.ItemDataRole.UserRole, cid)
+            name.setToolTip(category["name"])
+            self.table.setItem(row, 0, name)
+            count = QTableWidgetItem(str(len(manager.rows_for(cid))))
+            count.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(row, 1, count)
+            if cid in (ALL_CATEGORY, UNCATEGORIZED):
+                self.table.setItem(row, 2, QTableWidgetItem("内置汇总" if cid == ALL_CATEGORY else "内置类别"))
+                self.table.setRowHeight(row, 52)
+                continue
+            actions = QWidget()
+            buttons = QHBoxLayout(actions)
+            buttons.setContentsMargins(4, 4, 4, 4)
+            buttons.setSpacing(6)
+            rename = CutButton("重命名")
+            rename.setAccessibleName(f"重命名类别：{category['name']}")
+            rename.clicked.connect(lambda _=False, cid=cid: self.rename_category(cid))
+            delete = CutButton("删除类别")
+            delete.setAccessibleName(f"删除类别：{category['name']}")
+            delete.clicked.connect(lambda _=False, cid=cid: self.delete_category(cid))
+            for button in (rename, delete):
+                buttons.addWidget(button)
+                self.action_buttons.append(button)
+            self.table.setCellWidget(row, 2, actions)
+            # Item padding also reduces the geometry given to cell widgets.
+            self.table.setRowHeight(row, max(68, rename.sizeHint().height() + 26,
+                                             delete.sizeHint().height() + 26))
+            action_width = max(action_width, actions.sizeHint().width())
+        self.table.setColumnWidth(2, max(220, action_width))
+        self.update_actions()
+
+    def update_actions(self):
+        with self.window.sender.lock:
+            idle = (not self.window.sender.busy and self.window.import_worker is None
+                    and not self.window.closing)
+        for control in [self.name_input, self.create_button, *self.action_buttons]:
+            control.setEnabled(idle)
+
+    def apply_change(self, action):
+        try:
+            if self.window.import_worker is not None or self.window.closing:
+                raise ValueError("当前正在导入或退出，请稍后再修改类别。")
+            self.window.sender.edit(action)
+        except (OSError, ValueError) as exc:
+            dialog = QMessageBox(QMessageBox.Icon.Warning, "类别未保存", str(exc),
+                                 QMessageBox.StandardButton.Ok, self)
+            style_message_box(dialog, QMessageBox.StandardButton.Ok)
+            dialog.exec()
+            dialog.deleteLater()
+            return False
+        self.window.reload_messages(self.window.list_widget.currentRow())
+        self.reload_categories()
+        self.status_label.setText("类别已自动保存。删除类别时，消息会保留到“未分类”。")
+        return True
+
+    def create_category(self):
+        name = self.name_input.text().strip()
+        if self.apply_change(lambda: self.window.messages.create_category(name)):
+            self.name_input.clear()
+            self.name_input.setFocus()
+
+    def rename_category(self, cid):
+        dialog = MessageDialog(self, "重命名类别", self.window.messages.category_name(cid),
+                               field_label="类别名称", hint="名称不能重复，最多 40 个字符；发送进度保留。",
+                               confirm_text="保存名称")
+        dialog.input.setMaxLength(40)
+        accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        name = dialog.input.text().strip()
+        dialog.deleteLater()
+        if accepted:
+            self.apply_change(lambda: self.window.messages.rename_category(cid, name))
+
+    def delete_category(self, cid):
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("删除类别")
+        dialog.setText(f"确定删除类别“{self.window.messages.category_name(cid)}”？")
+        dialog.setInformativeText("其中的消息会移到“未分类”，不会删除消息。该类别将退出发送范围。")
+        dialog.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        dialog.button(QMessageBox.StandardButton.Yes).setText("删除类别")
+        dialog.button(QMessageBox.StandardButton.No).setText("取消")
+        dialog.setDefaultButton(QMessageBox.StandardButton.No)
+        style_message_box(dialog, QMessageBox.StandardButton.Yes)
+        answer = dialog.exec()
+        dialog.deleteLater()
+        if answer == QMessageBox.StandardButton.Yes:
+            self.apply_change(lambda: self.window.messages.delete_category(cid))
+
+
 class MainWindow(QMainWindow):
     def __init__(self, messages, config, sender, save_settings):
         super().__init__()
@@ -210,6 +369,7 @@ class MainWindow(QMainWindow):
         self.save_settings = save_settings
         self.settings_loaded = False
         self.import_worker = None
+        self.category_dialog = None
         self.closing = False
         self.updater = UpdateController(self)
         self.setWindowTitle(f"ValorantToxicTamer · V{VERSION}")
@@ -319,7 +479,7 @@ class MainWindow(QMainWindow):
         category_layout = QVBoxLayout(category_panel)
         category_layout.setContentsMargins(14, 12, 14, 12)
         category_layout.setSpacing(6)
-        category_layout.addWidget(label("发送类别", "section"))
+        category_layout.addWidget(label("参与发送的类别", "section"))
         self.send_categories = QListWidget()
         self.send_categories.setAccessibleName("参与发送的类别")
         self.send_categories.setToolTip("按勾选先后发送；全部消息与其他类别互斥。取消所有勾选可暂停发送。")
@@ -361,23 +521,20 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.count_label)
         toolbar.addStretch()
         self.add_button = self.button("添加消息", self.add_message, primary=True)
-        self.import_button = self.button("导入 TXT", self.import_txt)
+        self.import_button = self.button("导入消息", self.import_txt)
         toolbar.addWidget(self.add_button)
         toolbar.addWidget(self.import_button)
         manage_layout.addLayout(toolbar)
         category_bar = QHBoxLayout()
-        category_bar.addWidget(label("查看类别"))
+        category_bar.addWidget(label("筛选消息"))
         self.view_category = CutComboBox(wheel_changes=False)
-        self.view_category.setAccessibleName("查看消息类别")
+        self.view_category.setAccessibleName("按类别筛选消息，不改变发送范围")
         self.view_category.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.view_category.setMinimumWidth(100)
         self.view_category.currentIndexChanged.connect(self.filter_messages)
         category_bar.addWidget(self.view_category, 1)
-        self.create_category_button = self.button("新建", self.create_category)
-        self.rename_category_button = self.button("重命名", self.rename_category)
-        self.delete_category_button = self.button("删除类别", self.delete_category)
-        for button in (self.create_category_button, self.rename_category_button, self.delete_category_button):
-            category_bar.addWidget(button)
+        self.manage_categories_button = self.button("管理类别…", self.manage_categories)
+        category_bar.addWidget(self.manage_categories_button)
         manage_layout.addLayout(category_bar)
         self.search = CutLineEdit()
         self.search.setAccessibleName("搜索消息")
@@ -416,9 +573,9 @@ class MainWindow(QMainWindow):
         manage_layout.addWidget(self.message_stack, 1)
         manage_layout.addWidget(separator())
         buttons = QHBoxLayout()
-        self.edit_button = self.button("编辑", self.edit_message)
-        self.delete_button = self.button("删除", self.delete_message)
-        self.clear_button = self.button("清空列表", self.clear_messages)
+        self.edit_button = self.button("编辑消息", self.edit_message)
+        self.delete_button = self.button("删除选中消息", self.delete_message)
+        self.clear_button = self.button("清空消息…", self.clear_messages)
         self.up_button = self.button("", lambda: self.move(-1), icon=QStyle.StandardPixmap.SP_ArrowUp)
         self.down_button = self.button("", lambda: self.move(1), icon=QStyle.StandardPixmap.SP_ArrowDown)
         for button, name in ((self.up_button, "上移"), (self.down_button, "下移")):
@@ -433,17 +590,20 @@ class MainWindow(QMainWindow):
         buttons.addStretch()
         buttons.addWidget(self.export_button)
         manage_layout.addLayout(buttons)
-        batch = QHBoxLayout()
-        batch.addWidget(label("将选中消息移至"))
+        self.batch_category_bar = QWidget()
+        batch = QHBoxLayout(self.batch_category_bar)
+        batch.setContentsMargins(0, 0, 0, 0)
+        self.selected_count_label = label("所属类别")
+        batch.addWidget(self.selected_count_label)
         self.move_category = CutComboBox(wheel_changes=False)
-        self.move_category.setAccessibleName("移动消息的目标类别")
+        self.move_category.setAccessibleName("选中消息的新所属类别")
         self.move_category.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.move_category.setMinimumWidth(100)
         batch.addWidget(self.move_category, 1)
-        self.assign_category_button = self.button("移动", self.assign_category)
+        self.assign_category_button = self.button("修改所属类别", self.assign_category)
         batch.addWidget(self.assign_category_button)
-        manage_layout.addLayout(batch)
-        manage_layout.addWidget(label("已自动保存 · Ctrl / Shift 多选后可批量分类；添加、导入和导出使用查看类别。", "muted", True))
+        manage_layout.addWidget(self.batch_category_bar)
+        manage_layout.addWidget(label("已自动保存 · 筛选只影响消息列表；左侧勾选决定发送范围。", "muted", True))
         columns.addWidget(workspace, 7)
         return management
 
@@ -501,49 +661,19 @@ class MainWindow(QMainWindow):
         self.sync_categories()
         self.refresh_status()
 
-    def create_category(self):
-        dialog = MessageDialog(self, "新建类别", field_label="类别名称",
-                               hint="名称不能重复，最多 40 个字符。新类别不会自动勾选参与发送。")
-        dialog.input.setMaxLength(40)
-        accepted = dialog.exec() == QDialog.DialogCode.Accepted
-        name = dialog.input.text().strip()
-        dialog.deleteLater()
-        if accepted:
-            created = []
-            self.change(lambda: created.append(self.messages.create_category(name)))
-            if created:
-                self.view_category.setCurrentIndex(self.view_category.findData(created[0]))
-
-    def rename_category(self):
-        cid = self.view_category.currentData()
-        if cid in (ALL_CATEGORY, UNCATEGORIZED, None):
+    def manage_categories(self):
+        with self.sender.lock:
+            if self.sender.busy or self.import_worker is not None or self.closing:
+                return
+        if self.category_dialog is not None:
             return
-        dialog = MessageDialog(self, "重命名类别", self.messages.category_name(cid),
-                               field_label="类别名称", hint="名称不能重复，最多 40 个字符；发送进度保留。")
-        dialog.input.setMaxLength(40)
-        accepted = dialog.exec() == QDialog.DialogCode.Accepted
-        name = dialog.input.text().strip()
-        dialog.deleteLater()
-        if accepted:
-            self.change(lambda: self.messages.rename_category(cid, name))
-
-    def delete_category(self):
-        cid = self.view_category.currentData()
-        if cid in (ALL_CATEGORY, UNCATEGORIZED, None):
-            return
-        dialog = QMessageBox(self)
-        dialog.setWindowTitle("删除类别")
-        dialog.setText(f"确定删除类别“{self.messages.category_name(cid)}”？")
-        dialog.setInformativeText("其中的消息会移到“未分类”，保留消息内容。该类别将退出发送范围。")
-        dialog.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        dialog.button(QMessageBox.StandardButton.Yes).setText("删除类别")
-        dialog.button(QMessageBox.StandardButton.No).setText("取消")
-        dialog.setDefaultButton(QMessageBox.StandardButton.No)
-        style_message_box(dialog, QMessageBox.StandardButton.Yes)
-        answer = dialog.exec()
-        dialog.deleteLater()
-        if answer == QMessageBox.StandardButton.Yes:
-            self.change(lambda: self.messages.delete_category(cid))
+        self.category_dialog = CategoryManagerDialog(self)
+        try:
+            self.category_dialog.exec()
+        finally:
+            self.category_dialog.deleteLater()
+            self.category_dialog = None
+            self.refresh_status()
 
     def selected_rows(self):
         return sorted(self.list_widget.row(item) for item in self.list_widget.selectedItems()
@@ -776,13 +906,16 @@ class MainWindow(QMainWindow):
         self.down_button.setEnabled(idle and selected and 0 <= offset < len(category_rows) - 1 and not filtered)
         self.export_button.setEnabled(idle and bool(category_rows))
         self.assign_category_button.setEnabled(idle and bool(rows))
+        self.batch_category_bar.setVisible(bool(rows))
+        self.selected_count_label.setText(f"已选 {len(rows)} 条 · 所属类别")
         self.move_category.setEnabled(idle)
         self.view_category.setEnabled(idle)
         self.send_categories.setEnabled(idle)
-        self.create_category_button.setEnabled(idle)
-        custom = cid not in (ALL_CATEGORY, UNCATEGORIZED)
-        self.rename_category_button.setEnabled(idle and custom)
-        self.delete_category_button.setEnabled(idle and custom)
+        self.manage_categories_button.setEnabled(idle)
+        self.clear_button.setToolTip("清空整个消息库" if cid == ALL_CATEGORY
+                                     else f"清空“{self.messages.category_name(cid)}”中的消息")
+        if self.category_dialog is not None:
+            self.category_dialog.update_actions()
         if self.settings_loaded:
             self.save_button.setEnabled(idle)
 
@@ -867,22 +1000,31 @@ class MainWindow(QMainWindow):
 
     def change(self, action, row=0):
         if self.import_worker is not None or self.closing:
-            return
+            return False
         try:
             self.sender.edit(action)
             self.reload_messages(row)
             self.result_label.setText("已自动保存。修改消息会重置受影响类别和全部消息的进度；其他类别保留进度。")
+            return True
         except (OSError, ValueError) as exc:
             self.error(exc)
+            return False
 
     def add_message(self):
-        dialog = MessageDialog(self, "添加消息")
+        if self.import_worker is not None or self.closing:
+            return
+        cid = self.view_category.currentData()
+        if cid == ALL_CATEGORY:
+            cid = UNCATEGORIZED
+        dialog = MessageDialog(self, "添加消息", category_options=self.messages.categories,
+                               selected_category=cid, confirm_text="添加消息")
         accepted = dialog.exec() == QDialog.DialogCode.Accepted
         text = dialog.input.text().strip()
+        cid = dialog.category.currentData()
         dialog.deleteLater()
         if accepted:
-            cid = self.view_category.currentData()
-            self.change(lambda: self.messages.append([text], cid), len(self.messages.messages))
+            if self.change(lambda: self.messages.append([text], cid), len(self.messages.messages)):
+                self.result_label.setText(f"消息已添加到“{self.messages.category_name(cid)}”。发送范围保持当前勾选。")
 
     def edit_message(self, *_):
         if self.import_worker is not None or self.closing:
@@ -890,7 +1032,10 @@ class MainWindow(QMainWindow):
         row = self.list_widget.currentRow()
         if row < 0:
             return
-        dialog = MessageDialog(self, "编辑消息", self.messages.messages[row], row)
+        category = self.messages.category_name(self.messages.category_for(row))
+        dialog = MessageDialog(self, "编辑消息", self.messages.messages[row], row,
+                               hint=f"所属类别：{category}\n保存后，受影响类别和全部消息从第一条开始。",
+                               confirm_text="保存消息")
         accepted = dialog.exec() == QDialog.DialogCode.Accepted
         text = dialog.input.text().strip()
         dialog.deleteLater()
@@ -904,7 +1049,7 @@ class MainWindow(QMainWindow):
         dialog = QMessageBox(self)
         dialog.setWindowTitle("删除消息")
         dialog.setText("确定删除选中的消息？")
-        dialog.setInformativeText(f"第 {row + 1:02d} 条：{self.messages.messages[row]}\n删除后循环从第一条开始。")
+        dialog.setInformativeText(f"第 {row + 1:02d} 条：{self.messages.messages[row]}\n删除后，受影响类别和全部消息从第一条开始。")
         dialog.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         dialog.button(QMessageBox.StandardButton.Yes).setText("删除")
         dialog.button(QMessageBox.StandardButton.No).setText("取消")
@@ -974,6 +1119,8 @@ class MainWindow(QMainWindow):
             cid = self.import_category
             destination = UNCATEGORIZED if cid == ALL_CATEGORY else cid
             dialog.setWindowTitle(f"导入预览 · {self.messages.category_name(destination)}")
+            dialog.destination_label.setText(f"目标类别：{self.messages.category_name(destination)}")
+            dialog.destination_label.show()
             accepted = dialog.exec() == QDialog.DialogCode.Accepted
             skip_duplicates = dialog.skip_duplicates.isChecked()
             dialog.deleteLater()

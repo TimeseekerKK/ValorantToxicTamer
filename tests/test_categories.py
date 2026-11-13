@@ -10,12 +10,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QScrollArea
+from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QScrollArea, QPushButton
 
 from valorant_toxic_tamer.config_manager import ConfigManager, DEFAULT_CONFIG
 from valorant_toxic_tamer.message_manager import ALL_CATEGORY, UNCATEGORIZED, MessageManager
 from valorant_toxic_tamer.sender import Sender
-from valorant_toxic_tamer.ui import MainWindow, ImportDialog
+from valorant_toxic_tamer.ui import CategoryManagerDialog, MainWindow, ImportDialog
 from valorant_toxic_tamer.ui_theme import MessageDialog
 from test_core import FakeAPI
 
@@ -347,8 +347,12 @@ class CategoryUITests(unittest.TestCase):
         source = self.root / "import.txt"
         source.write_text("新增战术\nB1", encoding="utf-8")
         self.view(self.b)
+        def confirm(dialog):
+            self.assertEqual(dialog.destination_label.text(), "目标类别：战术")
+            self.assertFalse(dialog.destination_label.isHidden())
+            return QDialog.DialogCode.Accepted
         with patch("valorant_toxic_tamer.ui.QFileDialog.getOpenFileName", return_value=(str(source), "")), \
-                patch.object(ImportDialog, "exec", return_value=QDialog.DialogCode.Accepted):
+                patch.object(ImportDialog, "exec", confirm):
             self.window.import_txt()
             for _ in range(500):
                 if self.window.import_worker is None:
@@ -361,18 +365,16 @@ class CategoryUITests(unittest.TestCase):
         self.assertEqual(self.messages.messages[-2:], ["新增战术", "B1"])
 
     def test_category_dialogs_and_delete_keep_messages(self):
-        def confirm(dialog):
-            self.assertEqual(dialog.input.accessibleName(), "类别名称")
-            dialog.input.setText("新类别")
-            return QDialog.DialogCode.Accepted
-        with patch.object(MessageDialog, "exec", confirm):
-            self.window.create_category()
-        cid = self.window.view_category.currentData()
+        dialog = CategoryManagerDialog(self.window)
+        self.addCleanup(dialog.deleteLater)
+        dialog.name_input.setText("新类别")
+        dialog.create_category()
+        cid = self.messages.categories[-1]["id"]
         self.assertEqual(self.messages.category_name(cid), "新类别")
+        self.assertEqual(self.window.view_category.currentData(), ALL_CATEGORY)
         self.assertNotIn(cid, self.messages.selected_categories)
-        self.view(self.a)
         with patch.object(QMessageBox, "exec", return_value=QMessageBox.StandardButton.Yes):
-            self.window.delete_category()
+            dialog.delete_category(self.a)
         self.assertEqual(self.messages.messages, ["A1", "A2", "B1", "B2"])
         self.assertEqual(self.messages.rows_for(UNCATEGORIZED), [0, 1])
 
@@ -382,8 +384,7 @@ class CategoryUITests(unittest.TestCase):
         self.window.resize(840, 638)
         self.window.show()
         self.app.processEvents()
-        for widget in (self.window.view_category, self.window.create_category_button,
-                       self.window.rename_category_button, self.window.delete_category_button,
+        for widget in (self.window.view_category, self.window.manage_categories_button,
                        self.window.move_category, self.window.assign_category_button):
             self.assertTrue(widget.parentWidget().rect().contains(widget.geometry()))
         self.window.tabs.setCurrentIndex(1)
@@ -393,3 +394,138 @@ class CategoryUITests(unittest.TestCase):
         self.app.processEvents()
         self.assertTrue(scroll.viewport().rect().contains(
             self.window.category_mode.mapTo(scroll.viewport(), self.window.category_mode.rect().bottomRight())))
+
+    def category_dialog(self):
+        dialog = CategoryManagerDialog(self.window)
+        self.addCleanup(dialog.deleteLater)
+        return dialog
+
+    def test_opening_and_closing_category_manager_keeps_data_view_and_progress(self):
+        self.check(self.a)
+        self.messages.advance()
+        self.view(self.b)
+        before = self.messages.path.read_bytes()
+        def close(dialog):
+            self.assertIs(self.window.category_dialog, dialog)
+            self.assertEqual(dialog.table.rowCount(), 4)
+            self.assertFalse(any(b.text() == "添加消息" for b in dialog.findChildren(QPushButton)))
+            return QDialog.DialogCode.Accepted
+        with patch.object(CategoryManagerDialog, "exec", close):
+            self.window.manage_categories()
+        self.assertEqual(self.messages.path.read_bytes(), before)
+        self.assertEqual(self.messages.current, "A2")
+        self.assertEqual(self.window.view_category.currentData(), self.b)
+        self.assertIsNone(self.window.category_dialog)
+
+    def test_category_manager_rename_row_preserves_progress_and_selection(self):
+        self.check(self.a)
+        self.messages.advance()
+        self.view(self.a)
+        dialog = self.category_dialog()
+        def confirm(editor):
+            editor.input.setText("友好交流")
+            return QDialog.DialogCode.Accepted
+        with patch.object(MessageDialog, "exec", confirm):
+            button = dialog.table.cellWidget(2, 2).findChildren(QPushButton)[0]
+            button.click()
+        self.assertEqual(self.messages.category_name(self.a), "友好交流")
+        self.assertEqual(self.messages.current, "A2")
+        self.assertEqual(self.messages.selected_categories, [self.a])
+        self.assertEqual(self.window.view_category.currentText(), "友好交流")
+
+    def test_category_manager_cancel_delete_and_builtin_rows_keep_data(self):
+        dialog = self.category_dialog()
+        before = self.messages.path.read_bytes()
+        self.assertIsNone(dialog.table.cellWidget(0, 2))
+        self.assertIsNone(dialog.table.cellWidget(1, 2))
+        with patch.object(QMessageBox, "exec", return_value=QMessageBox.StandardButton.No):
+            dialog.delete_category(self.a)
+        self.assertEqual(self.messages.path.read_bytes(), before)
+
+    def test_category_manager_failed_saves_keep_input_and_file(self):
+        dialog = self.category_dialog()
+        before = self.messages.path.read_bytes()
+        with patch.object(QMessageBox, "exec", return_value=QMessageBox.StandardButton.Ok):
+            dialog.name_input.setText("鼓励")
+            dialog.create_category()
+            self.assertEqual(dialog.name_input.text(), "鼓励")
+            with patch("valorant_toxic_tamer.message_manager.atomic_json", side_effect=OSError("disk full")):
+                dialog.name_input.setText("保存失败")
+                dialog.create_category()
+        self.assertEqual(dialog.table.rowCount(), 4)
+        self.assertEqual(self.messages.path.read_bytes(), before)
+        self.assertEqual(dialog.name_input.text(), "保存失败")
+
+    def test_category_manager_busy_guard_blocks_opening_and_mutations(self):
+        dialog = self.category_dialog()
+        before = self.messages.path.read_bytes()
+        self.sender.busy = True
+        with patch.object(CategoryManagerDialog, "exec") as execute:
+            self.window.manage_categories()
+        execute.assert_not_called()
+        dialog.update_actions()
+        self.assertFalse(dialog.create_button.isEnabled())
+        with patch.object(QMessageBox, "exec", return_value=QMessageBox.StandardButton.Ok):
+            dialog.name_input.setText("不应保存")
+            dialog.create_category()
+        self.sender.busy = False
+        self.assertEqual(self.messages.path.read_bytes(), before)
+
+    def test_enter_creates_category_without_closing_manager(self):
+        dialog = self.category_dialog()
+        dialog.show()
+        self.app.processEvents()
+        dialog.name_input.setText("回车新建")
+        dialog.name_input.setFocus()
+        QTest.keyClick(dialog.name_input, Qt.Key.Key_Return)
+        self.app.processEvents()
+        self.assertTrue(dialog.isVisible())
+        self.assertEqual(self.messages.categories[-1]["name"], "回车新建")
+        self.assertEqual(dialog.name_input.text(), "")
+        dialog.hide()
+
+    def test_add_dialog_explicit_category_can_override_current_filter(self):
+        self.view(self.a)
+        def confirm(dialog):
+            self.assertEqual(dialog.category.currentData(), self.a)
+            self.assertEqual(dialog.category.findData(ALL_CATEGORY), -1)
+            dialog.category.setCurrentIndex(dialog.category.findData(self.b))
+            dialog.input.setText("明确加入战术")
+            return QDialog.DialogCode.Accepted
+        with patch.object(MessageDialog, "exec", confirm):
+            self.window.add_message()
+        self.assertEqual(self.messages.category_for(4), self.b)
+        self.assertEqual(self.window.view_category.currentData(), self.a)
+        self.assertEqual(self.messages.selected_categories, [ALL_CATEGORY])
+
+    def test_all_filter_defaults_add_destination_to_uncategorized(self):
+        def confirm(dialog):
+            self.assertEqual(dialog.category.currentData(), UNCATEGORIZED)
+            return QDialog.DialogCode.Rejected
+        before = self.messages.path.read_bytes()
+        with patch.object(MessageDialog, "exec", confirm):
+            self.window.add_message()
+        self.assertEqual(self.messages.path.read_bytes(), before)
+
+    def test_assignment_bar_is_hidden_without_selection(self):
+        self.window.list_widget.clearSelection()
+        self.window.update_actions()
+        self.assertTrue(self.window.batch_category_bar.isHidden())
+        self.window.list_widget.item(0).setSelected(True)
+        self.window.update_actions()
+        self.assertFalse(self.window.batch_category_bar.isHidden())
+        self.assertEqual(self.window.assign_category_button.text(), "修改所属类别")
+
+    def test_category_row_actions_are_not_clipped_at_largest_font(self):
+        self.config.save({**self.config.value, "font_size": 16})
+        self.window.apply_font_size()
+        dialog = self.category_dialog()
+        dialog.resize(620, 480)
+        dialog.show()
+        self.app.processEvents()
+        for row in (2, 3):
+            actions = dialog.table.cellWidget(row, 2)
+            for button in actions.findChildren(QPushButton):
+                self.assertTrue(actions.rect().contains(button.geometry()))
+                self.assertGreaterEqual(button.width(), button.fontMetrics().horizontalAdvance(button.text()))
+        dialog.hide()

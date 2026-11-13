@@ -310,7 +310,8 @@ class CutTabBar(QTabBar):
 
 
 class MessageDialog(QDialog):
-    def __init__(self, parent, title, text="", row=None, *, field_label="消息内容（单行）", hint=None):
+    def __init__(self, parent, title, text="", row=None, *, field_label="消息内容（单行）", hint=None,
+                 category_options=None, selected_category=None, confirm_text=None):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setWindowIcon(parent.windowIcon())
@@ -326,6 +327,14 @@ class MessageDialog(QDialog):
             number = QLabel(f"第 {row + 1:02d} 条")
             number.setObjectName("muted")
             layout.addWidget(number)
+        if category_options is not None:
+            layout.addWidget(QLabel("所属类别"))
+            self.category = CutComboBox(wheel_changes=False)
+            self.category.setAccessibleName("消息所属类别")
+            for category in category_options:
+                self.category.addItem(category["name"], category["id"])
+            self.category.setCurrentIndex(max(0, self.category.findData(selected_category)))
+            layout.addWidget(self.category)
         layout.addWidget(QLabel(field_label))
         self.input = CutLineEdit()
         self.input.setAccessibleName(field_label)
@@ -335,6 +344,7 @@ class MessageDialog(QDialog):
         self.input.setText(text)
         layout.addWidget(self.input)
         hint_label = QLabel(hint or "保存后自动更新列表，受影响类别和全部消息从第一条开始。")
+        hint_label.setTextFormat(Qt.TextFormat.PlainText)
         hint_label.setWordWrap(True)
         hint_label.setObjectName("muted")
         layout.addWidget(hint_label)
@@ -342,7 +352,7 @@ class MessageDialog(QDialog):
         actions.addStretch()
         cancel = CutButton("取消")
         cancel.clicked.connect(self.reject)
-        save = CutButton("保存" if row is not None else "添加", primary=True)
+        save = CutButton(confirm_text or ("保存" if row is not None else "添加"), primary=True)
         save.setDefault(True)
         save.clicked.connect(self.accept)
         actions.addWidget(cancel)
