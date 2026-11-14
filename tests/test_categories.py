@@ -12,7 +12,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QScrollArea, QPushButton
 
-from valorant_toxic_tamer.config_manager import ConfigManager, DEFAULT_CONFIG
+from valorant_toxic_tamer.config_manager import ConfigManager, DEFAULT_CONFIG, atomic_json
 from valorant_toxic_tamer.message_manager import ALL_CATEGORY, UNCATEGORIZED, MessageManager
 from valorant_toxic_tamer.sender import Sender
 from valorant_toxic_tamer.ui import CategoryManagerDialog, CategoryOrderDelegate, MainWindow, ImportDialog
@@ -127,6 +127,73 @@ class CategoryTests(unittest.TestCase):
         self.assertEqual(self.messages.current, "A2")
         self.assertEqual(self.messages.selected_categories, [self.a])
         self.assertEqual(self.messages.category_name(self.a), "友好交流")
+
+    def test_unchanged_operations_skip_save_rebuild_and_preserve_schedule(self):
+        self.messages.select_categories([ALL_CATEGORY])
+        self.take(2)
+        self.messages.select_categories([self.a, self.b])
+        self.messages.set_mode("alternating")
+        self.take(3)
+        before = self.messages.path.read_bytes()
+        positions = self.messages._positions.copy()
+        active = self.messages.current_category
+        operations = (
+            lambda: self.messages.edit_message(0, "A1"),
+            lambda: self.messages.rename_category(self.a, " 鼓励 "),
+            lambda: self.messages.move_to_category([0, 1], self.a),
+            lambda: self.messages.select_categories([self.a, self.b]),
+            lambda: self.messages.append([], self.a),
+            lambda: self.messages.delete_messages([]),
+            lambda: self.messages.swap(0, 0),
+        )
+        with patch("valorant_toxic_tamer.message_manager.atomic_json") as save, \
+                patch.object(self.messages, "_rebuild") as rebuild:
+            for index, operation in enumerate(operations):
+                with self.subTest(operation=index):
+                    self.assertIs(operation(), False)
+                    self.assertEqual(self.messages._positions, positions)
+                    self.assertEqual(self.messages.current_category, active)
+            save.assert_not_called()
+            rebuild.assert_not_called()
+        self.assertEqual(self.messages.path.read_bytes(), before)
+
+    def test_partial_assignment_saves_once_and_resets_only_affected_progress(self):
+        self.messages.append(["E1", "E2"], self.empty)
+        self.messages.select_categories([ALL_CATEGORY])
+        self.take(2)
+        self.messages.select_categories([self.a])
+        self.take(1)
+        self.messages.select_categories([self.b])
+        self.take(1)
+        self.messages.select_categories([self.empty])
+        self.take(1)
+        with patch("valorant_toxic_tamer.message_manager.atomic_json",
+                   wraps=atomic_json) as save:
+            self.assertIs(self.messages.move_to_category([0, 3], self.a), True)
+            save.assert_called_once()
+        self.assertEqual(self.messages.rows_for(self.a), [0, 1, 2, 3])
+        self.assertEqual(self.messages._positions[ALL_CATEGORY], 0)
+        self.assertEqual(self.messages._positions[self.a], 0)
+        self.assertEqual(self.messages._positions[self.b], 0)
+        self.assertEqual(self.messages.current, "E2")
+        self.assertEqual(MessageManager(self.messages.path).rows_for(self.a), [0, 1, 2, 3])
+
+    def test_unchanged_legacy_edit_does_not_migrate_or_create_backup(self):
+        path = self.root / "legacy.json"
+        original = b'\xef\xbb\xbf["old", "next"]\r\n'
+        path.write_bytes(original)
+        manager = MessageManager(path)
+        manager.advance()
+        with patch("valorant_toxic_tamer.message_manager.atomic_json") as save:
+            self.assertIs(manager.edit_message(0, "old"), False)
+            self.assertIs(manager.move_to_category([0], UNCATEGORIZED), False)
+            self.assertIs(manager.replace(["old", "next"]), False)
+            save.assert_not_called()
+        self.assertEqual(manager.position, 1)
+        self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(list(self.root.glob("legacy.legacy-*.json")), [])
+        self.assertIs(manager.edit_message(0, "changed"), True)
+        self.assertEqual(list(self.root.glob("legacy.legacy-*.json"))[0].read_bytes(), original)
 
     def test_batch_assignment_preserves_text_order_and_unaffected_progress(self):
         self.messages.select_categories([self.b])
@@ -264,6 +331,40 @@ class CategoryUITests(unittest.TestCase):
 
     def view(self, cid):
         self.window.view_category.setCurrentIndex(self.window.view_category.findData(cid))
+
+    def test_assigning_selected_messages_to_current_category_skips_reload(self):
+        self.check(self.a)
+        self.messages.advance()
+        self.view(self.a)
+        self.window.list_widget.setCurrentRow(0)
+        self.window.list_widget.item(1).setSelected(True)
+        self.window.move_category.setCurrentIndex(self.window.move_category.findData(self.a))
+        before = self.messages.path.read_bytes()
+        with patch.object(self.window, "reload_messages") as reload_messages, \
+                patch("valorant_toxic_tamer.message_manager.atomic_json") as save:
+            self.window.assign_category()
+            save.assert_not_called()
+            reload_messages.assert_not_called()
+        self.assertEqual(self.messages.current, "A2")
+        self.assertEqual(self.window.selected_rows(), [0, 1])
+        self.assertEqual(self.messages.path.read_bytes(), before)
+        self.assertIn("未变化", self.window.result_label.text())
+
+    def test_unchanged_category_name_skips_both_list_reloads(self):
+        dialog = CategoryManagerDialog(self.window)
+        self.addCleanup(dialog.deleteLater)
+        self.check(self.a)
+        self.messages.advance()
+        with patch.object(MessageDialog, "exec", return_value=QDialog.DialogCode.Accepted), \
+                patch.object(self.window, "reload_messages") as reload_messages, \
+                patch.object(dialog, "reload_categories") as reload_categories, \
+                patch("valorant_toxic_tamer.message_manager.atomic_json") as save:
+            dialog.rename_category(self.a)
+            save.assert_not_called()
+            reload_messages.assert_not_called()
+            reload_categories.assert_not_called()
+        self.assertEqual(self.messages.current, "A2")
+        self.assertIn("未变化", dialog.status_label.text())
 
     def test_check_order_all_exclusivity_and_rechecking_moves_to_end(self):
         self.check(self.b)

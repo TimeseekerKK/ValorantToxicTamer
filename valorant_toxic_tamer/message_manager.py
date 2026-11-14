@@ -221,6 +221,9 @@ class MessageManager:
             self._active_category = None
 
     def _commit(self, library, reset=(), *, selection_changed=False):
+        # An unchanged library must not migrate legacy data or reset progress.
+        if library == self._library:
+            return False
         validate_library(library)
         if self._legacy:
             # Keep the exact old file before the first successful format migration.
@@ -241,12 +244,12 @@ class MessageManager:
         if selection_changed:
             self._active_category = None
         self._rebuild()
+        return True
 
     def select_categories(self, categories):
         library = deepcopy(self._library)
         library["selected_categories"] = list(categories)
-        if library != self._library:
-            self._commit(library, selection_changed=True)
+        return self._commit(library, selection_changed=True)
 
     def create_category(self, name):
         cid = uuid4().hex
@@ -258,9 +261,12 @@ class MessageManager:
     def rename_category(self, cid, name):
         if cid in (ALL_CATEGORY, UNCATEGORIZED) or cid not in self._rows:
             raise ValueError("内置类别不能重命名")
+        name = name.strip()
+        if name == self.category_name(cid):
+            return False
         library = deepcopy(self._library)
-        next(c for c in library["categories"] if c["id"] == cid)["name"] = name.strip()
-        self._commit(library)
+        next(c for c in library["categories"] if c["id"] == cid)["name"] = name
+        return self._commit(library)
 
     def delete_category(self, cid):
         if cid in (ALL_CATEGORY, UNCATEGORIZED) or cid not in self._rows:
@@ -271,55 +277,60 @@ class MessageManager:
             if entry["category"] == cid:
                 entry["category"] = UNCATEGORIZED
         library["selected_categories"] = [c for c in self.selected_categories if c != cid]
-        self._commit(library, (UNCATEGORIZED,), selection_changed=True)
+        return self._commit(library, (UNCATEGORIZED,), selection_changed=True)
 
     def _edit_entries(self, entries, affected):
         library = deepcopy(self._library)
         library["messages"] = entries
-        self._commit(library, set(affected) | {ALL_CATEGORY})
+        return self._commit(library, set(affected) | {ALL_CATEGORY})
 
     def append(self, messages, category=UNCATEGORIZED):
         messages = list(messages)
         validate_messages(messages)
         if category == ALL_CATEGORY:
             category = UNCATEGORIZED
-        self._edit_entries(deepcopy(self._library["messages"]) + [self._entry(t, category) for t in messages],
-                           (category,))
+        return self._edit_entries(deepcopy(self._library["messages"]) + [self._entry(t, category) for t in messages],
+                                  (category,))
 
     def edit_message(self, row, text):
+        if self._messages[row] == text:
+            return False
         entries = deepcopy(self._library["messages"])
         entries[row]["text"] = text
-        self._edit_entries(entries, (entries[row]["category"],))
+        return self._edit_entries(entries, (entries[row]["category"],))
 
     def delete_messages(self, rows):
         rows = set(rows)
         entries = self._library["messages"]
-        self._edit_entries([deepcopy(e) for i, e in enumerate(entries) if i not in rows],
-                           {e["category"] for i, e in enumerate(entries) if i in rows})
+        return self._edit_entries([deepcopy(e) for i, e in enumerate(entries) if i not in rows],
+                                  {e["category"] for i, e in enumerate(entries) if i in rows})
 
     def move_to_category(self, rows, category):
         if category == ALL_CATEGORY or category not in self._rows:
             raise ValueError("请选择一个实际类别")
+        rows = [row for row in rows if self.category_for(row) != category]
+        if not rows:
+            return False
         entries = deepcopy(self._library["messages"])
         affected = {category}
         for row in rows:
             affected.add(entries[row]["category"])
             entries[row]["category"] = category
-        self._edit_entries(entries, affected)
+        return self._edit_entries(entries, affected)
 
     def swap(self, row, target):
         entries = deepcopy(self._library["messages"])
         affected = {entries[row]["category"], entries[target]["category"]}
         entries[row], entries[target] = entries[target], entries[row]
-        self._edit_entries(entries, affected)
+        return self._edit_entries(entries, affected)
 
     def replace(self, messages):
         validate_messages(messages)
-        self._edit_entries([self._entry(t, UNCATEGORIZED) for t in messages], self._rows)
+        return self._edit_entries([self._entry(t, UNCATEGORIZED) for t in messages], self._rows)
 
     def import_txt(self, path: Path):
         preview = prepare_txt_import(path, self.messages)
-        self.append(preview.messages)
+        return self.append(preview.messages)
 
     def export_txt(self, path: Path, category=ALL_CATEGORY):
         messages = [self._messages[row] for row in self.rows_for(category)]
