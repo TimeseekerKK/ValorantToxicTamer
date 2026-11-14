@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QScrollArea, QPushButton
 
@@ -404,8 +404,13 @@ class CategoryUITests(unittest.TestCase):
     def test_category_dialogs_and_delete_keep_messages(self):
         dialog = CategoryManagerDialog(self.window)
         self.addCleanup(dialog.deleteLater)
-        dialog.name_input.setText("新类别")
-        dialog.create_category()
+        def confirm(editor):
+            self.assertEqual(editor.windowTitle(), "新建类别")
+            self.assertEqual(editor.input.maxLength(), 40)
+            editor.input.setText("新类别")
+            return QDialog.DialogCode.Accepted
+        with patch.object(MessageDialog, "exec", confirm):
+            dialog.create_button.click()
         cid = self.messages.categories[-1]["id"]
         self.assertEqual(self.messages.category_name(cid), "新类别")
         self.assertEqual(self.window.view_category.currentData(), ALL_CATEGORY)
@@ -482,16 +487,34 @@ class CategoryUITests(unittest.TestCase):
     def test_category_manager_failed_saves_keep_input_and_file(self):
         dialog = self.category_dialog()
         before = self.messages.path.read_bytes()
-        with patch.object(QMessageBox, "exec", return_value=QMessageBox.StandardButton.Ok):
-            dialog.name_input.setText("鼓励")
-            dialog.create_category()
-            self.assertEqual(dialog.name_input.text(), "鼓励")
-            with patch("valorant_toxic_tamer.message_manager.atomic_json", side_effect=OSError("disk full")):
-                dialog.name_input.setText("保存失败")
+        def attempt(name):
+            calls = 0
+            def confirm(editor):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    editor.input.setText(name)
+                    return QDialog.DialogCode.Accepted
+                self.assertEqual(editor.input.text(), name)
+                return QDialog.DialogCode.Rejected
+            with patch.object(MessageDialog, "exec", confirm):
                 dialog.create_category()
+            self.assertEqual(calls, 2)
+        with patch.object(QMessageBox, "exec", return_value=QMessageBox.StandardButton.Ok):
+            attempt("鼓励")
+            attempt("  ")
+            with patch("valorant_toxic_tamer.message_manager.atomic_json", side_effect=OSError("disk full")):
+                attempt("保存失败")
         self.assertEqual(dialog.table.rowCount(), 4)
         self.assertEqual(self.messages.path.read_bytes(), before)
-        self.assertEqual(dialog.name_input.text(), "保存失败")
+
+    def test_category_manager_cancel_creation_keeps_data(self):
+        dialog = self.category_dialog()
+        before = self.messages.path.read_bytes()
+        with patch.object(MessageDialog, "exec", return_value=QDialog.DialogCode.Rejected):
+            dialog.create_button.click()
+        self.assertEqual(dialog.table.rowCount(), 4)
+        self.assertEqual(self.messages.path.read_bytes(), before)
 
     def test_category_manager_busy_guard_blocks_opening_and_mutations(self):
         dialog = self.category_dialog()
@@ -502,8 +525,9 @@ class CategoryUITests(unittest.TestCase):
         execute.assert_not_called()
         dialog.update_actions()
         self.assertFalse(dialog.create_button.isEnabled())
-        with patch.object(QMessageBox, "exec", return_value=QMessageBox.StandardButton.Ok):
-            dialog.name_input.setText("不应保存")
+        with patch.object(QMessageBox, "exec", return_value=QMessageBox.StandardButton.Ok), \
+                patch.object(MessageDialog, "exec", side_effect=[QDialog.DialogCode.Accepted,
+                                                               QDialog.DialogCode.Rejected]):
             dialog.create_category()
         self.sender.busy = False
         self.assertEqual(self.messages.path.read_bytes(), before)
@@ -512,13 +536,16 @@ class CategoryUITests(unittest.TestCase):
         dialog = self.category_dialog()
         dialog.show()
         self.app.processEvents()
-        dialog.name_input.setText("回车新建")
-        dialog.name_input.setFocus()
-        QTest.keyClick(dialog.name_input, Qt.Key.Key_Return)
+        def enter_name():
+            editor = self.app.activeModalWidget()
+            self.assertIsInstance(editor, MessageDialog)
+            editor.input.setText("回车新建")
+            QTest.keyClick(editor.input, Qt.Key.Key_Return)
+        QTimer.singleShot(0, enter_name)
+        dialog.create_button.click()
         self.app.processEvents()
         self.assertTrue(dialog.isVisible())
         self.assertEqual(self.messages.categories[-1]["name"], "回车新建")
-        self.assertEqual(dialog.name_input.text(), "")
         dialog.hide()
 
     def test_add_dialog_explicit_category_can_override_current_filter(self):

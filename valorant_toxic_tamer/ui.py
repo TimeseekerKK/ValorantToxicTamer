@@ -268,23 +268,13 @@ class CategoryManagerDialog(QDialog):
         """)
         layout.addWidget(self.table, 1)
         layout.addWidget(separator())
-        new_row = QHBoxLayout()
-        caption = label("新类别名称")
-        self.name_input = CutLineEdit()
-        self.name_input.setAccessibleName("新类别名称")
-        self.name_input.setMaxLength(40)
-        self.name_input.setPlaceholderText("输入类别名称，最多 40 个字符")
-        caption.setBuddy(self.name_input)
-        new_row.addWidget(caption)
-        new_row.addWidget(self.name_input, 1)
-        self.create_button = CutButton("新建类别", primary=True)
+        self.create_button = CutButton("新建类别…", primary=True)
         self.create_button.clicked.connect(self.create_category)
         self.create_button.setDefault(True)
-        new_row.addWidget(self.create_button)
-        layout.addLayout(new_row)
         self.status_label = label("删除类别后，其中的消息将移到“未分类”，不会删除消息。", "muted", True)
         layout.addWidget(self.status_label)
         footer = QHBoxLayout()
+        footer.addWidget(self.create_button)
         footer.addStretch()
         self.done_button = CutButton("完成")
         self.done_button.clicked.connect(self.accept)
@@ -337,7 +327,7 @@ class CategoryManagerDialog(QDialog):
         with self.window.sender.lock:
             idle = (not self.window.sender.busy and self.window.import_worker is None
                     and not self.window.closing)
-        for control in [self.name_input, self.create_button, *self.action_buttons]:
+        for control in [self.create_button, *self.action_buttons]:
             control.setEnabled(idle)
 
     def apply_change(self, action):
@@ -358,10 +348,16 @@ class CategoryManagerDialog(QDialog):
         return True
 
     def create_category(self):
-        name = self.name_input.text().strip()
-        if self.apply_change(lambda: self.window.messages.create_category(name)):
-            self.name_input.clear()
-            self.name_input.setFocus()
+        dialog = MessageDialog(self, "新建类别", field_label="类别名称",
+                               hint="名称不能为空或重复，最多 40 个字符。",
+                               confirm_text="新建类别")
+        dialog.input.setMaxLength(40)
+        dialog.input.setPlaceholderText("输入类别名称")
+        while dialog.exec() == QDialog.DialogCode.Accepted:
+            name = dialog.input.text().strip()
+            if self.apply_change(lambda: self.window.messages.create_category(name)):
+                break
+        dialog.deleteLater()
 
     def rename_category(self, cid):
         dialog = MessageDialog(self, "重命名类别", self.window.messages.category_name(cid),
