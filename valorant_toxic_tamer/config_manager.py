@@ -24,7 +24,7 @@ FONT_SIZES = tuple(range(9, 17))
 
 def data_directory() -> Path:
     if getattr(sys, "frozen", False):
-        return Path(os.environ["LOCALAPPDATA"]) / "ValorantToxicTamer" / "data"
+        return Path(sys.executable).resolve().parent / "data"
     return Path(__file__).resolve().parents[1] / "data"
 
 

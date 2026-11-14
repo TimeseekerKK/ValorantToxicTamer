@@ -1,4 +1,4 @@
-"""Real replacement/forced-exit smoke test, using disposable fixture EXEs only.
+"""Real installer handoff smoke test, using disposable fixture EXEs only.
 
 Run explicitly: .venv\\Scripts\\python.exe tests/native_update_smoke.py
 Never starts ValorantToxicTamer or sends keyboard input.
@@ -37,18 +37,20 @@ class NativeUpdateSmoke(unittest.TestCase):
                 process.kill()
             process.wait(timeout=10)
 
-    def build_fixture(self, path, version, wait):
+    def build_fixture(self, path, version, wait, exit_code=0):
         source = path.with_suffix(".cs")
         source.write_text('''using System;
 using System.IO;
 using System.Threading;
 class Fixture {
-    static void Main() {
+    static void Main(string[] args) {
         string folder = AppDomain.CurrentDomain.BaseDirectory;
         File.WriteAllText(Path.Combine(folder, "VERSION.marker"), "VERSION");
+        File.WriteAllLines(Path.Combine(folder, "VERSION.arguments"), args);
         Thread.Sleep(WAIT);
+        Environment.Exit(EXIT_CODE);
     }
-}'''.replace("VERSION", version).replace("WAIT", str(wait)), encoding="utf-8")
+}'''.replace("VERSION", version).replace("WAIT", str(wait)).replace("EXIT_CODE", str(exit_code)), encoding="utf-8")
         subprocess.run([str(self.compiler), "/nologo", "/target:winexe", f"/out:{path}", str(source)],
                        check=True, capture_output=True, timeout=30)
 
@@ -58,20 +60,20 @@ class Fixture {
             time.sleep(0.1)
         self.assertTrue(check())
 
-    def test_force_exit_replace_restart_and_other_installation_survives(self):
+    def test_wait_for_exit_launch_installer_and_other_installation_survives(self):
         target = self.directory / "fixture.exe"
         staged = self.directory / "staged.exe"
-        self.build_fixture(target, "old", 60000)
+        self.build_fixture(target, "old", 4000)
         self.build_fixture(staged, "new", 0)
-        expected = hashlib.sha256(staged.read_bytes()).hexdigest()
+        expected = hashlib.sha256(target.read_bytes()).hexdigest()
         other_directory = self.directory / "other installation"
         other_directory.mkdir()
         decoy = other_directory / target.name
-        shutil.copyfile(target, decoy)
+        self.build_fixture(decoy, "decoy", 60000)
         for exe in (target, decoy):
             self.processes.append(subprocess.Popen([str(exe)], creationflags=subprocess.CREATE_NO_WINDOW))
         self.wait_until(lambda: (self.directory / "old.marker").exists()
-                        and (other_directory / "old.marker").exists())
+                        and (other_directory / "decoy.marker").exists())
         helper = self.directory / "helper"
         helper.mkdir()
         with patch("valorant_toxic_tamer.updater.tempfile.mkdtemp", return_value=str(helper)):
@@ -83,9 +85,11 @@ class Fixture {
         self.assertIsNotNone(self.processes[0].poll())
         self.assertIsNone(self.processes[1].poll())
         self.assertEqual(hashlib.sha256(target.read_bytes()).hexdigest(), expected)
+        arguments = (self.directory / "new.arguments").read_text(encoding="utf-8-sig").splitlines()
+        self.assertIn(f"/DIR={self.directory}", arguments)
+        self.assertIn(f"/DATASOURCE={self.directory / 'data'}", arguments)
+        installer.wait(timeout=15)
         self.assertFalse(staged.exists())
-        self.wait_until(lambda: not Path(str(staged) + ".bak").exists())
-        installer.wait(timeout=10)
 
     def test_helper_rejects_checksum_before_terminating_or_replacing(self):
         target = self.directory / "fixture.exe"
@@ -106,6 +110,21 @@ class Fixture {
         self.assertEqual(target.read_bytes(), b"original")
         self.assertIn("checksum", (helper / "error.txt").read_text(encoding="utf-8-sig"))
         self.assertFalse((helper / "ready").exists())
+
+    def test_cancelled_installer_restarts_original_without_replacing_it(self):
+        target, staged = self.directory / "old.exe", self.directory / "setup.exe"
+        self.build_fixture(target, "restarted", 0)
+        self.build_fixture(staged, "cancelled", 0, exit_code=2)
+        before = target.read_bytes()
+        helper = self.directory / "helper"
+        helper.mkdir()
+        with patch("valorant_toxic_tamer.updater.tempfile.mkdtemp", return_value=str(helper)):
+            installer = launch_installer(staged, target)
+        self.processes.append(installer)
+        installer.wait(timeout=30)
+        self.wait_until(lambda: (self.directory / "restarted.marker").exists())
+        self.assertEqual(target.read_bytes(), before)
+        self.assertFalse(staged.exists())
 
 
 if __name__ == "__main__":

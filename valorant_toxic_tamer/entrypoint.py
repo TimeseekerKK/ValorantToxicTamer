@@ -3,6 +3,9 @@ import sys
 
 
 def main():
+    if len(sys.argv) == 4 and sys.argv[1] == "--migrate-data":
+        from .data_migration import run
+        return run(sys.argv[2], sys.argv[3])
     if len(sys.argv) == 3 and sys.argv[1] == "--performance-check":
         import time
         started = time.perf_counter()

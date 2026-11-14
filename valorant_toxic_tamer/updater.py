@@ -100,13 +100,12 @@ def latest_release(current=VERSION, *, channel="stable"):
         return None
     assets = [asset for asset in payload.get("assets", [])
               if asset.get("state") == "uploaded" and asset.get("name", "").lower().endswith(".exe")]
-    exact = [asset for asset in assets if asset["name"].casefold() == EXE_NAME.casefold()]
+    installer_name = f"ValorantToxicTamer-Setup-{tag}.exe"
+    exact = [asset for asset in assets if asset["name"].casefold() == installer_name.casefold()]
     if len(exact) == 1:
         asset = exact[0]
-    elif len(assets) == 1:
-        asset = assets[0]
     else:
-        raise ValueError(f"最新 Release 未提供唯一的程序 EXE，请上传 {EXE_NAME}。")
+        raise ValueError(f"目标版本未提供安装包 {installer_name}，请前往发布页手动安装该版本。")
     url = asset.get("browser_download_url", "")
     parsed = urlsplit(url)
     if (parsed.scheme != "https" or parsed.netloc != "github.com"
