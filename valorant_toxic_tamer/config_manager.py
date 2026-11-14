@@ -16,6 +16,7 @@ DEFAULT_CONFIG = {
     "start_hidden": True,
     "autostart": False,
     "font_size": 13,
+    "category_mode": "sequential",
 }
 HOTKEYS = tuple(f"F{i}" for i in range(1, 12))  # F12 is reserved by Windows.
 FONT_SIZES = tuple(range(9, 17))
@@ -58,9 +59,12 @@ def load_json(path: Path, default, validate):
 
 
 def validate_config(value):
-    if not isinstance(value, dict) or set(value) not in (
-            set(DEFAULT_CONFIG), set(DEFAULT_CONFIG) - {"font_size"}):
+    optional = {"font_size", "category_mode"}
+    if (not isinstance(value, dict) or not set(DEFAULT_CONFIG) - optional <= set(value)
+            or not set(value) <= set(DEFAULT_CONFIG)):
         raise ValueError("配置字段不完整或含未知字段")
+    if value.get("category_mode", "sequential") not in ("sequential", "alternating"):
+        raise ValueError("多类别发送方式无效")
     font_size = value.get("font_size", DEFAULT_CONFIG["font_size"])
     if type(font_size) is not int or font_size not in FONT_SIZES:
         raise ValueError("字体大小须为 9–16 px 的整数")
@@ -81,6 +85,7 @@ class ConfigManager:
         self.value = load_json(path, DEFAULT_CONFIG, validate_config)
         # Keep valid old files intact until the user explicitly saves settings.
         self.value.setdefault("font_size", DEFAULT_CONFIG["font_size"])
+        self.value.setdefault("category_mode", DEFAULT_CONFIG["category_mode"])
 
     def save(self, value):
         validate_config(value)
