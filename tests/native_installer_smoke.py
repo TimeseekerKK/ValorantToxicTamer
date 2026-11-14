@@ -53,6 +53,7 @@ class NativeInstallerSmoke(unittest.TestCase):
         install = parent / "ValorantToxicTamer"
         self.install(parent)
         self.assertTrue((install / "ValorantToxicTamer.exe").is_file())
+        self.assertTrue((install / "licenses/InnoSetupChineseSimplified.txt").is_file())
         self.assertFalse((install / "ValorantToxicTamer").exists())
         data = install / "data"
         data.mkdir()

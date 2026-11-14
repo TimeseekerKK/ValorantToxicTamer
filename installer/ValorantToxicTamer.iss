@@ -45,6 +45,7 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; Flags: unchecked
 
 [Files]
 Source: "{#AppExe}"; DestDir: "{app}"; DestName: "ValorantToxicTamer.exe"; Flags: ignoreversion
+Source: "ChineseSimplified.LICENSE"; DestDir: "{app}\licenses"; DestName: "InnoSetupChineseSimplified.txt"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#AppTitle}"; Filename: "{app}\ValorantToxicTamer.exe"
