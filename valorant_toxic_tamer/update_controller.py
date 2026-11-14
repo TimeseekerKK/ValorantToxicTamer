@@ -206,7 +206,8 @@ class UpdateController(QObject):
             detail = "\n目标正式版低于当前 Beta，此操作将降级程序。" if downgrade else ""
             dialog.setInformativeText(
                 f"更新渠道：{UPDATE_CHANNELS[self.channel]}\n当前版本：v{VERSION}\n目标版本：{release.version}"
-                f"{detail}\n确认后将下载更新，退出当前程序并覆盖 EXE，然后重新启动。")
+                f"{detail}\n确认后将下载安装包，退出当前程序并打开安装向导。"
+                "升级保留个人数据；免安装版完成后将按安装版管理。")
             dialog.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             dialog.button(QMessageBox.StandardButton.Yes).setText("是")
             dialog.button(QMessageBox.StandardButton.No).setText("否")
@@ -245,11 +246,11 @@ class UpdateController(QObject):
                 except Exception:
                     staged.unlink(missing_ok=True)
                     raise
-            self.window.result_label.setText("正在准备覆盖安装…")
+            self.window.result_label.setText("正在准备启动安装向导…")
             self.window.update_button.setText("准备安装…")
             self._start("install", prepare)
         else:
-            self.window.result_label.setText("更新已准备就绪，正在退出并覆盖安装…")
+            self.window.result_label.setText("安装包已准备就绪，正在退出并打开安装向导…")
             self.ready_to_install.emit()
 
     def begin_shutdown(self):

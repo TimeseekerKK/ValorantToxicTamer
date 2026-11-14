@@ -1,3 +1,4 @@
+param([string]$InnoCompiler = $env:INNO_SETUP_COMPILER, [switch]$SkipInstaller)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $pythonPath = Join-Path $projectRoot '.venv\Scripts\python.exe'
@@ -27,6 +28,22 @@ try {
     & $pythonPath tests/check_package.py $outputPath
     if ($LASTEXITCODE -ne 0) { throw '打包依赖检查失败，不能分发此 EXE。' }
     Write-Host "打包完成：$outputPath"
+    if (-not $SkipInstaller) {
+        if (-not $InnoCompiler) {
+            $InnoCompiler = @(
+                (Join-Path $projectRoot '.tools\InnoSetup6\ISCC.exe'),
+                "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+                "$env:ProgramFiles\Inno Setup 7\ISCC.exe"
+            ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+        }
+        if (-not $InnoCompiler) {
+            throw '未找到 Inno Setup 编译器，请安装 Inno Setup 6.7.4+ 并设置 INNO_SETUP_COMPILER。仅构建免安装版可使用 -SkipInstaller。'
+        }
+        & $InnoCompiler "/DAppVersion=$($appVersion.Trim())" "/DAppExe=$outputPath" (Join-Path $projectRoot 'installer\ValorantToxicTamer.iss')
+        if ($LASTEXITCODE -ne 0) { throw '安装包编译失败。' }
+        Copy-Item -LiteralPath $outputPath -Destination (Join-Path $projectRoot 'dist\ValorantToxicTamer.exe') -Force
+        Write-Host "安装包完成：dist\ValorantToxicTamer-Setup-v$($appVersion.Trim()).exe"
+    }
 } finally {
     $env:PATH = $originalPath
     Pop-Location

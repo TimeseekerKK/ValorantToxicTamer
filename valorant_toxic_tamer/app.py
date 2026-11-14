@@ -182,6 +182,17 @@ def main():
         return 1
     directory = data_directory()
     try:
+        if getattr(sys, "frozen", False):
+            from .data_migration import has_data, legacy_directory, migrate_data
+            source = legacy_directory()
+            if (not directory.parent.joinpath(".vtt-migration-skipped").exists()
+                    and not has_data(directory) and has_data(source) and source.resolve() != directory.resolve()):
+                answer = QMessageBox.question(None, "迁移旧数据", f"检测到旧版个人数据：\n{source}\n\n"
+                    f"是否迁移到：\n{directory}\n\n迁移并校验成功后，将删除已迁移的旧数据。",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No)
+                if answer == QMessageBox.StandardButton.Yes:
+                    migrate_data(source, directory)
         directory.mkdir(parents=True, exist_ok=True)
         lock = QLockFile(str(directory / "application.lock"))
         lock.setStaleLockTime(0)
@@ -189,10 +200,20 @@ def main():
             QMessageBox.warning(None, "无法启动", "程序已在运行，或数据目录无法写入。请检查系统托盘及目录权限。")
             return 1
         controller = Application(app, directory)
+        # Inno Setup checks this mutex before replacing or uninstalling files.
+        import ctypes
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p]
+        kernel.CreateMutexW.restype = ctypes.c_void_p
+        mutex = kernel.CreateMutexW(None, False, "Local\\ValorantToxicTamer")
+        if not mutex:
+            raise ctypes.WinError(ctypes.get_last_error())
     except (OSError, ValueError, RuntimeError) as exc:
         QMessageBox.critical(None, "启动失败", str(exc))
         return 1
     result = app.exec()
+    kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel.CloseHandle(mutex)
     lock.unlock()
     del controller
     return result

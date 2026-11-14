@@ -23,8 +23,8 @@ class UpdaterTests(unittest.TestCase):
         self.target = self.directory / "当前程序.exe"
         self.target.write_bytes(b"old program")
         self.content = b"MZ" + b"new exe" * 100
-        self.url = f"https://github.com/{REPOSITORY}/releases/download/v1.1.0/{EXE_NAME}"
-        self.asset = dict(name=EXE_NAME, state="uploaded", size=len(self.content),
+        self.url = f"https://github.com/{REPOSITORY}/releases/download/v1.1.0/ValorantToxicTamer-Setup-v1.1.0.exe"
+        self.asset = dict(name="ValorantToxicTamer-Setup-v1.1.0.exe", state="uploaded", size=len(self.content),
                           browser_download_url=self.url,
                           digest="sha256:" + hashlib.sha256(self.content).hexdigest())
         self.payload = dict(tag_name="v1.1.0", prerelease=False, draft=False, assets=[self.asset])
@@ -61,6 +61,10 @@ class UpdaterTests(unittest.TestCase):
         self.assertIsNone(self.lookup("1.2.0"))
 
     def beta_lookup(self, releases, current="1.0.0"):
+        if isinstance(releases, list):
+            releases = [dict(item, assets=[dict(asset,
+                name=f"ValorantToxicTamer-Setup-{item.get('tag_name')}.exe")
+                for asset in item.get("assets", [])]) for item in releases]
         response = io.BytesIO(json.dumps(releases).encode())
         with patch("valorant_toxic_tamer.updater.urlopen", return_value=response) as request:
             result = latest_release(current, channel="beta")
@@ -87,7 +91,8 @@ class UpdaterTests(unittest.TestCase):
 
     def test_beta_channel_reads_all_pages_before_selecting_newest_version(self):
         pages = [io.BytesIO(json.dumps([self.payload] * 100).encode()),
-                 io.BytesIO(json.dumps([dict(self.payload, tag_name="v1.3.0-beta.1", prerelease=True)]).encode())]
+                 io.BytesIO(json.dumps([dict(self.payload, tag_name="v1.3.0-beta.1", prerelease=True,
+                    assets=[dict(self.asset, name="ValorantToxicTamer-Setup-v1.3.0-beta.1.exe")])]).encode())]
         with patch("valorant_toxic_tamer.updater.urlopen", side_effect=pages) as request:
             result = latest_release("1.0.0", channel="beta")
         self.assertEqual(result.version, "v1.3.0-beta.1")
@@ -105,6 +110,7 @@ class UpdaterTests(unittest.TestCase):
 
     def test_newer_release_selects_expected_exe(self):
         self.payload["assets"] += [dict(self.asset, name="uninstaller.exe"),
+                                  dict(self.asset, name=EXE_NAME),
                                   dict(self.asset, name="source.zip")]
         self.assertEqual(self.lookup(), self.release)
 
@@ -113,15 +119,16 @@ class UpdaterTests(unittest.TestCase):
             self.payload.update(tag_name=tag, assets=[])
             self.assertIsNone(self.lookup())
 
-    def test_single_versioned_exe_is_supported(self):
+    def test_portable_only_release_requires_manual_install(self):
         self.asset["name"] = "ValorantToxicTamer-v1.1.0.exe"
-        self.assertEqual(self.lookup(), self.release)
+        with self.assertRaisesRegex(ValueError, "手动安装"):
+            self.lookup()
 
     def test_missing_or_ambiguous_exe_is_reported(self):
         for assets in ([], [dict(self.asset, name="source.zip")],
                        [dict(self.asset, name="x64.exe"), dict(self.asset, name="arm64.exe")]):
             self.payload["assets"] = assets
-            with self.assertRaisesRegex(ValueError, "EXE"):
+            with self.assertRaisesRegex(ValueError, "安装包"):
                 self.lookup()
 
     def test_unpublished_and_prerelease_are_rejected(self):

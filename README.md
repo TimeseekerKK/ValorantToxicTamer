@@ -4,7 +4,7 @@
 
 把常用消息按类别整理，在游戏中按快捷键发送到队伍或全体聊天。支持类别多选、独立发送进度、中文输入、消息搜索、TXT 导入导出，以及正式版 / Beta 双渠道更新。
 
-**运行平台：** Windows 10 / 11　·　**当前源码版本：** `v1.7.0-beta.3`
+**运行平台：** Windows 10 / 11　·　**当前源码版本：** `v1.7.0-beta.4`
 
 [下载程序](https://github.com/TimeseekerKK/ValorantToxicTamer/releases) · [快速开始](#快速开始) · [技术栈](#技术栈) · [使用方法](#使用方法) · [项目原理](#项目原理) · [项目结构与开发](#项目结构与开发) · [免责声明](#免责声明) · [许可证](#许可证)
 
@@ -19,12 +19,13 @@
 | 个人消息管理 | 添加、编辑、删除、清空、排序和搜索；长消息可滚动预览，修改自动保存 |
 | TXT 导入导出 | 每行一条消息，支持导入预览、可选去重、备份与迁移 |
 | 托盘常驻 | 默认隐藏到托盘；支持自定义快捷键、字号、发送冷却和开机启动 |
-| 应用内更新 | 可选择正式版或 Beta 渠道，支持下载进度、取消检查 / 下载和覆盖更新 |
+| 安装与卸载 | 自选安装位置，自动补齐软件目录；卸载默认删除整个安装目录，可改选保留个人数据 |
+| 应用内更新 | 可选择正式版或 Beta 渠道，支持下载进度、取消检查 / 下载，并运行新版安装向导 |
 
 ## 快速开始
 
-1. 前往 [Releases](https://github.com/TimeseekerKK/ValorantToxicTamer/releases)，选择所需版本，下载附件中的 `ValorantToxicTamer-v<完整版本号>.exe`。
-2. 双击 EXE，在 Windows 管理员权限提示中选择「是」。**打包版无需安装 Python 或依赖。**
+1. 前往 [Releases](https://github.com/TimeseekerKK/ValorantToxicTamer/releases)，下载 `ValorantToxicTamer-Setup-v<完整版本号>.exe` 安装包；需要免安装运行时下载 `ValorantToxicTamer.exe`。
+2. 运行安装包并选择位置：选择 `D:\Apps` 会安装到 `D:\Apps\ValorantToxicTamer`；末级目录已经是软件名时不会重复追加。安装版与免安装版启动时都需要允许管理员权限请求。**打包版无需安装 Python 或依赖。**
 3. 双击任务栏右下角的托盘图标，打开「消息管理」，添加消息或使用「TXT 导入」，勾选需要发送的类别（默认「全部消息」）。
 4. 切回 Valorant，关闭聊天框并松开 Shift / Ctrl / Alt / Win，按 **F8** 或 **F9** 发送。
 
@@ -41,7 +42,7 @@
 | Windows API + `ctypes` | Python 标准库调用原生接口 | `RegisterHotKey` 注册全局快捷键，`SendInput` 模拟键盘与 Unicode 文本输入，检查游戏前台窗口并请求 UAC 提权 |
 | JSON + TXT | 本地文件存储 | JSON 保存消息与设置，通过临时文件和 `os.replace` 写入；TXT 用于导入导出 |
 | `urllib` + [truststore](https://truststore.readthedocs.io/) | 标准库 + `0.10.5` | 查询 GitHub Releases、下载更新，使用 Windows 系统证书信任链校验 HTTPS |
-| [PyInstaller](https://pyinstaller.org/en/stable/) + PowerShell | `6.22.3` + 构建 / 更新脚本 | 打包 Windows 单文件 EXE，并执行更新替换与重启 |
+| [PyInstaller](https://pyinstaller.org/en/stable/) + PowerShell + [Inno Setup](https://jrsoftware.org/inno-setup) | `6.22.3` + Inno Setup `6.7.4` | 构建免安装 EXE 和安装包，并启动更新安装向导 |
 | `unittest` + GitHub Actions | 标准库 + Windows CI | 自动测试、依赖检查、EXE 构建与性能基线报告 |
 
 界面采用 Qt Widgets；消息保存在本机，日常消息管理和快捷发送不需要部署后端或数据库。检查和下载更新时才访问 GitHub。
@@ -59,6 +60,10 @@
 ### 1. 启动程序
 
 **使用打包版：** 在 [Releases](https://github.com/TimeseekerKK/ValorantToxicTamer/releases) 下载所需版本的 EXE 并双击启动。正常启动时默认请求管理员权限，请在 Windows 用户账户控制（UAC）提示中选择「是」；拒绝授权则退出。已经以管理员身份运行时直接启动，不重复请求。
+
+安装版与免安装版均将个人数据保存在 EXE 同级的 `data` 文件夹，移动免安装版时请一起移动 `data`。检测到旧版 `%LOCALAPPDATA%\ValorantToxicTamer\data` 时会询问是否迁移；安装时也可选择从之前的安装位置迁移。迁移先复制并校验，成功后删除已迁移的源数据；目标已有数据时不覆盖、不删除旧数据。迁移前请退出旧程序。
+
+卸载可从 Windows「已安装的应用」进入，默认选择「不保留个人数据」，会删除整个安装目录，包括手动放入的其他文件。改选「保留个人数据」可留下 `data`，重装到同一位置后继续使用。未迁移的旧版数据目录不会随新安装卸载而删除。
 
 **从源码运行：** 先下载并解压本仓库源码，安装 Python 3.11，然后在包含 `main.py` 的项目根目录打开 PowerShell，执行：
 
@@ -145,11 +150,11 @@ py -3.11 -m venv .venv
 - **正式版 Release**：只接收正式版。正在使用 Beta 时，可以切回较旧的最新正式版；安装前会明确显示当前版本、目标版本及降级警告，默认选择「否」。
 - **测试版 Beta**：接收正式版和 Beta 测试版，按版本号选择最高版本，不自动降级。测试功能可能尚不稳定。
 
-按钮使用线条刷新图标，检查、下载和准备安装时显示旋转动画，并暂时锁定渠道选择，避免中途切换。程序会查询对应渠道的 GitHub Release，比较版本号并查找其中的 EXE。发现新版本后弹出「发现新版本,是否更新」：选择「否」保持当前程序继续运行；选择「是」则下载并校验文件，退出当前程序，覆盖原位置的 EXE，然后重新启动。仍在运行的同路径程序会被强制退出；消息和设置保留在原数据目录。
+按钮使用线条刷新图标，检查、下载和准备安装时显示旋转动画，并暂时锁定渠道选择。程序查询对应渠道的 GitHub Release，比较版本号并选择该版本的安装包。发现新版本后选择「是」会下载并校验安装包，正常退出程序后打开安装向导，默认沿用当前目录，升级保留个人数据。免安装版自动更新也会进入安装流程，安装后按安装版管理；程序尚未退出时不会强制结束进程。
 
-检查和下载期间可点击「取消更新」；下载时显示百分比、已下载大小和总大小。取消后删除本次临时下载，保留当前程序，并可重新检查。进入「准备安装」后不再提供取消，以免中断覆盖流程。退出程序会取消尚未完成的检查或下载，并在后台任务清理期间保持界面响应。
+检查和下载期间可点击「取消更新」；下载时显示百分比、已下载大小和总大小。取消后删除本次临时下载，保留当前程序。交给安装向导后可在向导中取消，安装前取消时重新启动原程序。退出软件会取消尚未完成的检查或下载，并在后台任务清理期间保持界面响应。
 
-下载失败时保留当前版本；覆盖失败会显示错误并保留原文件，启动失败会尝试恢复旧 EXE。覆盖更新仅支持打包后的 Windows EXE，且程序所在目录须可写；源码运行不能覆盖 Python 解释器。仅在明确选择正式版渠道、从 Beta 切回正式版并确认后允许降级；其它更新不降级。
+下载或校验失败时保留当前版本。安装失败会显示错误并保留安装日志，安装包不覆盖个人数据。应用内更新仅支持打包后的 Windows 程序；源码运行不能替换 Python 解释器。仅在明确选择正式版渠道、从 Beta 切回正式版并确认后允许降级；其它更新不降级。历史版本未提供安装包时会提示前往发布页手动安装，不能把免安装 EXE 当作安装包运行。
 
 更新查询和下载使用 Windows 原生证书信任链，保持 HTTPS 证书与主机名校验。若仍提示证书校验失败，请检查系统日期时间、Windows 证书更新，以及代理或安全软件的 HTTPS 证书设置，然后重试。
 
@@ -157,7 +162,7 @@ py -3.11 -m venv .venv
 
 更新渠道文件损坏或无法读取时，程序暂用正式版渠道，消息管理和快捷发送仍可使用，原文件不会自动覆盖。在设置页点击「恢复更新设置」，或重新选择渠道，会先将原文件备份为同目录的 `update_settings.invalid-*.json`，再保存渠道；备份或保存失败时会提示错误并保留原文件。
 
-正式发布时使用 `v1.2.3` 形式的版本标签，Beta 使用 `v1.2.3-beta.1`；同步修改 `valorant_toxic_tamer/app_version.py` 中的 `VERSION`，并上传单文件 `ValorantToxicTamer-v<完整版本号>.exe`，保留 `-beta.N` 后缀。每个 Release 只上传一个程序 EXE，更新器支持这种附件名称。通过 `scripts/build.ps1` 打包时会自动读取 `VERSION` 生成文件名，并一并包含独立更新脚本和证书验证依赖。自动更新覆盖原路径的 EXE，保留原文件名。
+正式发布时使用 `v1.2.3` 形式的标签，Beta 使用 `v1.2.3-beta.1`。每次发布上传同次构建的两个附件：`ValorantToxicTamer-Setup-v<完整版本号>.exe` 和 `ValorantToxicTamer.exe`。新版更新器明确选择安装包；旧版更新器通过固定名称匹配免安装附件，完成一次过渡更新后采用安装包流程。`scripts/build.ps1` 读取 `VERSION` 构建两个发布附件，并保留本地带版本号的免安装 EXE 便于追溯。
 
 ### 常见问题
 
@@ -259,7 +264,7 @@ ValorantToxicTamer/
 
 源码启动仍使用 `main.py`，也支持 `.\.venv\Scripts\python.exe -m valorant_toxic_tamer`。应用内部使用包内相对导入，测试和辅助工具通过 `valorant_toxic_tamer` 导入模块。
 
-源码运行继续读写项目根目录的 `data/`；打包版继续使用 `%LOCALAPPDATA%\ValorantToxicTamer\data`。移动代码目录无需迁移已有消息或设置。
+源码运行读写项目根目录的 `data/`；打包版使用 EXE 同级的 `data/`。安装包脚本位于 `installer/`；首次构建先运行 `.\scripts\setup-inno.ps1` 准备 Inno Setup 编译器，再运行 `.\scripts\build.ps1`。也可通过 `INNO_SETUP_COMPILER` 指定已有 `ISCC.exe`，或用 `-SkipInstaller` 仅构建免安装 EXE。原生安装生命周期验证运行 `.\.venv\Scripts\python.exe -B tests/native_installer_smoke.py`，使用独立安装标识和临时数据，不操作现有安装。
 
 ### 自动检查与性能基线
 

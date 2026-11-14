@@ -14,10 +14,10 @@ class PathTests(unittest.TestCase):
         with patch("sys.frozen", False, create=True):
             self.assertEqual(data_directory(), Path(__file__).resolve().parents[1] / "data")
 
-    def test_frozen_uses_existing_local_app_data(self):
+    def test_frozen_uses_data_beside_actual_executable(self):
         with patch("sys.frozen", True, create=True), \
-                patch.dict("os.environ", {"LOCALAPPDATA": "C:/Users/example/AppData/Local"}):
-            self.assertEqual(data_directory(), Path("C:/Users/example/AppData/Local/ValorantToxicTamer/data"))
+                patch("sys.executable", "D:/Apps/中文 test/ValorantToxicTamer.exe"):
+            self.assertEqual(data_directory(), Path(sys.executable).resolve().parent / "data")
 
     def test_source_autostart_points_to_root_launcher(self):
         executable = Path(sys.executable)

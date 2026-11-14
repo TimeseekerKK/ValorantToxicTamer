@@ -47,7 +47,14 @@ jobs:
       - name: Record source performance baseline
         run: .\.venv\Scripts\python.exe -B scripts/performance_baseline.py --output artifacts/performance/source.json
       - name: Build and check EXE dependencies
-        run: .\scripts\build.ps1
+        run: |
+          .\scripts\setup-inno.ps1
+          .\scripts\build.ps1
+      - name: Check installer lifecycle
+        run: |
+          .\.venv\Scripts\python.exe -B tests/native_installer_smoke.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\.venv\Scripts\python.exe -B tests/native_update_smoke.py
       - name: Record packaged performance baseline
         run: |
           $version = & .\.venv\Scripts\python.exe -B -c 'from valorant_toxic_tamer.app_version import VERSION; print(VERSION)'
