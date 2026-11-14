@@ -5,7 +5,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QPen
 from PySide6.QtWidgets import (QDialog, QFileDialog, QFormLayout,
     QFrame, QHBoxLayout, QHeaderView, QLabel, QListWidget, QListWidgetItem, QMainWindow,
     QMessageBox, QProgressBar, QScrollArea, QSizePolicy, QStackedWidget, QStyle,
-    QStyledItemDelegate, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
+    QStyledItemDelegate, QStyleOptionViewItem, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
 
 from .config_manager import DEFAULT_CONFIG, FONT_SIZES, HOTKEYS
 from .message_manager import (ALL_CATEGORY, UNCATEGORIZED, CATEGORY_MODES,
@@ -33,6 +33,35 @@ def separator():
     line.setObjectName("separator")
     line.setFixedHeight(1)
     return line
+
+
+class CategoryOrderDelegate(QStyledItemDelegate):
+    ORDER_ROLE = Qt.ItemDataRole.UserRole + 1
+
+    def paint(self, painter, option, index):
+        styled = QStyleOptionViewItem(option)
+        self.initStyleOption(styled, index)
+        order = index.data(self.ORDER_ROLE)
+        checked = styled.checkState == Qt.CheckState.Checked
+        # Keep the standard layout and hit target, replacing only the check mark.
+        if checked:
+            styled.checkState = Qt.CheckState.Unchecked
+        style = styled.widget.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, styled, painter, styled.widget)
+        if checked and order is not None:
+            rect = style.subElementRect(QStyle.SubElement.SE_ItemViewItemCheckIndicator, styled, styled.widget)
+            painter.save()
+            painter.setPen(QPen(QColor("#68ded2" if styled.state & QStyle.StateFlag.State_Enabled else MUTED), 1))
+            painter.setBrush(QColor("#203b3a"))
+            painter.drawRect(rect.adjusted(0, 0, -1, -1))
+            font = QFont(styled.font)
+            font.setBold(True)
+            text = str(order)
+            while font.pixelSize() > 8 and QFontMetrics(font).horizontalAdvance(text) > rect.width() - 4:
+                font.setPixelSize(font.pixelSize() - 1)
+            painter.setFont(font)
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
+            painter.restore()
 
 
 class MessageDelegate(QStyledItemDelegate):
@@ -480,12 +509,13 @@ class MainWindow(QMainWindow):
         category_layout.setSpacing(6)
         category_layout.addWidget(label("参与发送的类别", "section"))
         self.send_categories = QListWidget()
+        self.send_categories.setItemDelegate(CategoryOrderDelegate(self.send_categories))
         self.send_categories.setAccessibleName("参与发送的类别")
-        self.send_categories.setToolTip("按勾选先后发送；全部消息与其他类别互斥。取消所有勾选可暂停发送。")
+        self.send_categories.setToolTip("勾选框内数字表示发送顺序，取消后自动补位；全部消息与其他类别互斥。取消所有勾选可暂停发送。")
         self.send_categories.setFixedHeight(100)
         self.send_categories.setStyleSheet("""
             QListWidget::item { min-height: 26px; padding: 1px 3px; }
-            QListWidget::indicator { width: 14px; height: 14px; border: 1px solid #8595a5; }
+            QListWidget::indicator { width: 26px; height: 24px; border: 1px solid #8595a5; }
             QListWidget::indicator:unchecked { background: #121d27; }
             QListWidget::indicator:checked { background: #38645f; }
         """)
@@ -625,9 +655,12 @@ class MainWindow(QMainWindow):
             self.send_categories.clear()
             for category in categories:
                 cid = category["id"]
-                prefix = f"{selected.index(cid) + 1}. " if cid in selected else ""
-                item = QListWidgetItem(f"{prefix}{category['name']} ({len(self.messages.rows_for(cid))})")
+                order = selected.index(cid) + 1 if cid in selected else None
+                item = QListWidgetItem(f"{category['name']} ({len(self.messages.rows_for(cid))})")
                 item.setData(Qt.ItemDataRole.UserRole, cid)
+                item.setData(CategoryOrderDelegate.ORDER_ROLE, order)
+                item.setData(Qt.ItemDataRole.AccessibleDescriptionRole,
+                             f"发送顺序 {order}" if order is not None else "未参与发送")
                 item.setToolTip(category["name"])
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                 item.setCheckState(Qt.CheckState.Checked if cid in selected else Qt.CheckState.Unchecked)

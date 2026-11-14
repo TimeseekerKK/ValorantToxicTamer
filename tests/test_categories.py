@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QScrollArea, Q
 from valorant_toxic_tamer.config_manager import ConfigManager, DEFAULT_CONFIG
 from valorant_toxic_tamer.message_manager import ALL_CATEGORY, UNCATEGORIZED, MessageManager
 from valorant_toxic_tamer.sender import Sender
-from valorant_toxic_tamer.ui import CategoryManagerDialog, MainWindow, ImportDialog
+from valorant_toxic_tamer.ui import CategoryManagerDialog, CategoryOrderDelegate, MainWindow, ImportDialog
 from valorant_toxic_tamer.ui_theme import MessageDialog
 from test_core import FakeAPI
 
@@ -275,6 +275,43 @@ class CategoryUITests(unittest.TestCase):
         self.assertEqual(self.messages.selected_categories, [self.a, self.b])
         self.check(ALL_CATEGORY)
         self.assertEqual(self.messages.selected_categories, [ALL_CATEGORY])
+
+    def test_checkbox_numbers_follow_click_order_and_close_gaps_without_renaming(self):
+        self.messages.set_mode("alternating")
+        self.check(self.b)
+        self.check(UNCATEGORIZED)
+        self.check(self.a)
+
+        def assert_order(expected):
+            selected = []
+            for row in range(self.window.send_categories.count()):
+                item = self.window.send_categories.item(row)
+                cid = item.data(Qt.ItemDataRole.UserRole)
+                self.assertEqual(item.text(),
+                                 f"{self.messages.category_name(cid)} ({len(self.messages.rows_for(cid))})")
+                order = item.data(CategoryOrderDelegate.ORDER_ROLE)
+                if cid in expected:
+                    self.assertEqual(order, expected.index(cid) + 1)
+                    self.assertEqual(item.checkState(), Qt.CheckState.Checked)
+                    selected.append(cid)
+                else:
+                    self.assertIsNone(order)
+                    self.assertEqual(item.checkState(), Qt.CheckState.Unchecked)
+            self.assertCountEqual(selected, expected)
+            self.assertEqual(self.messages.selected_categories, expected)
+            self.assertEqual(MessageManager(self.messages.path).selected_categories, expected)
+
+        assert_order([self.b, UNCATEGORIZED, self.a])
+        self.check(self.b, False)
+        assert_order([UNCATEGORIZED, self.a])
+        self.check(self.b)
+        assert_order([UNCATEGORIZED, self.a, self.b])
+        self.check(self.a, False)
+        assert_order([UNCATEGORIZED, self.b])
+        self.check(ALL_CATEGORY)
+        assert_order([ALL_CATEGORY])
+        self.check(ALL_CATEGORY, False)
+        assert_order([])
 
     def test_view_and_search_do_not_change_sending_selection_or_progress(self):
         self.check(self.a)
