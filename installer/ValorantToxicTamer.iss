@@ -19,7 +19,7 @@ AppVersion={#AppVersion}
 AppPublisher=TimeseekerKK
 DefaultDirName={autopf}\ValorantToxicTamer
 DisableDirPage=no
-AppendDefaultDirName=no
+AppendDefaultDirName=yes
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=commandline
@@ -60,6 +60,7 @@ var
   MigrationSource, PreviousDir: String;
   DeletePersonalData: Boolean;
   NormalizingDir: Boolean;
+  DefaultDirBrowseClick: TNotifyEvent;
 
 function GetFileAttributesW(lpFileName: String): LongWord;
   external 'GetFileAttributesW@kernel32.dll stdcall';
@@ -98,6 +99,19 @@ begin
   NormalizingDir := False;
 end;
 
+procedure BrowseDir(Sender: TObject);
+var Value, Parent: String;
+begin
+  DefaultDirBrowseClick(Sender);
+  Value := RemoveBackslashUnlessRoot(Trim(WizardForm.DirEdit.Text));
+  Parent := ExtractFileDir(Value);
+  { The built-in browser appends the name even when that folder was selected. }
+  if (CompareText(ExtractFileName(Value), 'ValorantToxicTamer') = 0) and
+     (CompareText(ExtractFileName(Parent), 'ValorantToxicTamer') = 0) then
+    WizardForm.DirEdit.Text := Parent;
+  DirChanged(nil);
+end;
+
 procedure UpdateMigrationSource;
 begin
   MigrationSource := ExpandConstant('{param:DATASOURCE|}');
@@ -120,6 +134,8 @@ begin
   MigrationPage.Add('迁移旧数据，成功后删除源数据');
   MigrationPage.Values[0] := ExpandConstant('{param:MIGRATEDATA|0}') = '1';
   WizardForm.DirEdit.OnExit := @DirChanged;
+  DefaultDirBrowseClick := WizardForm.DirBrowseButton.OnClick;
+  WizardForm.DirBrowseButton.OnClick := @BrowseDir;
   DirChanged(nil);
   UpdateMigrationSource;
 end;
