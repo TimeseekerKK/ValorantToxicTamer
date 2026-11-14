@@ -85,9 +85,9 @@ description: 在 ValorantToxicTamer 完成软件改动后自动审核、升版�
 | `Beta` | `origin/Beta` | `1.3.0-beta.2` | `v1.3.0-beta.2` | `v1.3.0-beta.2` | 预发布 / 否 |
 
 - 分支大小写以实际仓库为准，当前为 `main` 和 `Beta`。按“分支选择、同步与例外”确定发布来源并准备目标工作区；默认授权必要的定向移植和分支准备，不把 Beta 整体合入 main 作为日常小修复的捷径。其它分支或 detached HEAD 也先按改动性质选择目标，不直接从不明来源发布。
-- `valorant_toxic_tamer/app_version.py` 的 `VERSION` 写入脚本返回的完整 `version`，不带 v。README 标题和表示当前版本的内容用 `v` 加完整版本；保留历史记录与测试样例。**Release title 必须与完整 Git 标签完全一致**，使用脚本的 `title`，其值应等于 `tag`：正式版如 `v1.3.0`，Beta 如 `v1.3.0-beta.2`，保留 Beta 序号，不加软件名、空格、日期或说明。渠道由预发布标记表示，正文仅叙述修改内容。
+- `valorant_toxic_tamer/app_version.py` 的 `VERSION` 写入脚本返回的完整 `version`，不带 v。README 标题和表示当前版本的内容用 `v` 加完整版本；保留历史记录与测试样例。**Release title 必须与完整 Git 标签完全一致**，使用脚本的 `title`，其值应等于 `tag`：正式版如 `v1.3.0`，Beta 如 `v1.3.0-beta.2`，保留 Beta 序号，不加软件名、空格、日期或说明。渠道由预发布标记表示，正文说明修改内容及安装包与免安装版的区别。
 - **核对目标分支的更新器兼容性**：发布 Beta 前检查当前源码及相关测试，确认支持完整 `-beta.N` 解析与比较：Beta 序号按整数比较，同基础号正式版高于任何 Beta，较高基础号始终更高。正式渠道仅接收正式 Release；Beta 渠道能力以目标分支实际实现为准，不因发布 Pre-release 自动改变用户的更新渠道。不以旧版技能中的实现状态代替当前代码证据；已支持的能力核实即可。
-- 完成版本同步和兼容性检查后，从对应分支本次源码执行 `scripts/build.ps1`，由脚本读取 `VERSION`，重新构建 `dist/ValorantToxicTamer-v<完整版本号>.exe`，保留 `-beta.N` 后缀；打包依赖检查使用同一生成路径，不能复用另一分支的旧产物或重命名旧 EXE。若有 Windows 版本资源，数字元组使用基础号的 `x.y.z.0`，字符串版本保留完整版本；未配置资源时不声称 Windows 文件属性已更新。
+- 完成版本同步和兼容性检查后，从对应分支本次源码执行 `scripts/build.ps1`，由脚本读取 `VERSION`，重新构建 `dist/ValorantToxicTamer-v<完整版本号>.exe`，保留 `-beta.N` 后缀；打包依赖检查使用同一生成路径。由同次构建生成安装包 `dist/ValorantToxicTamer-Setup-v<完整版本号>.exe` 和固定名称的免安装附件 `dist/ValorantToxicTamer.exe`，本地保留带版本号的免安装 EXE 便于追溯。不能复用另一分支的旧产物或重命名旧 EXE；正式交付双附件时不能使用 `-SkipInstaller` 跳过安装包。若有 Windows 版本资源，数字元组使用基础号的 `x.y.z.0`，字符串版本保留完整版本；未配置资源时不声称 Windows 文件属性已更新。
 
 在仓库根目录使用现有环境，依次执行：
 
@@ -104,10 +104,10 @@ description: 在 ValorantToxicTamer 完成软件改动后自动审核、升版�
 
 1. 审核并提交本次软件改动、VERSION 和 README，推送到来源分支对应的远端分支；不夹带无关内容、个人数据或构建目录。记录完整提交 SHA，确保构建源码与其一致；已完成步骤只核实并复用。
 2. 按计划创建指向该准确提交的 annotated tag 并推送该标签；已有标签须验证指向一致，禁止默认指向远端默认分支最新提交。记录软件提交、完整版本、渠道及 EXE SHA-256 的对应关系。
-3. 先创建草稿 Release，显式设置计划的 tag 和与其完全一致的 title，并上传本次生成的 EXE，附件名为 `ValorantToxicTamer-v<完整版本号>.exe`，必须与本次应用 `VERSION` 和 Release 标签一致，并保留 `-beta.N` 后缀。每个 Release 只上传一个程序 EXE；现有更新器支持单个带版本号的 EXE，自动更新仍覆盖原路径并保留原文件名。撰写正文时读取并遵循 [write-release-notes](../write-release-notes/SKILL.md)，用简体中文仅叙述本次修改内容，省略完整版本、来源分支、源码提交和验证说明；CLI 多行正文使用文件传入。
+3. 先创建草稿 Release，显式设置计划的 tag 和与其完全一致的 title，并上传同次构建的两个附件：`ValorantToxicTamer-Setup-v<完整版本号>.exe` 和 `ValorantToxicTamer.exe`。安装包名称必须与本次应用 `VERSION` 和 Release 标签一致，并保留 `-beta.N` 后缀；固定名称的免安装附件也必须来自本次版本构建。新版更新器明确选择安装包；固定名称的免安装附件供手动运行，并兼容旧版更新器的过渡更新。撰写正文时读取并遵循 [write-release-notes](../write-release-notes/SKILL.md)，用简体中文说明本次修改，并在末尾提醒安装包与免安装版的区别及免安装版应用内自动更新会转为安装版；不另列完整版本、来源分支、源码提交和验证说明，实际附件名中的版本号保留。CLI 多行正文使用文件传入。
 4. 核对源码提交、标签、标题、附件与远端最新状态后发布：main 的基础号须高于最新正式版，设置 `draft=false, prerelease=false, latest=true`；Beta 须仍处于开放版本线，设置 `draft=false, prerelease=true, latest=false`。Beta 不得替换正式版 Latest。
 5. 重试先使用 `--resume` 原目标，已有标签需传 `--expected-commit`。结果 `status=published` 只代表元数据匹配，仍须核实附件；草稿补齐缺项后再发布。同名已发布内容不匹配则停止，不擅自覆盖附件、使用 `--clobber`、删除 Release 或切换渠道。Beta 晋升用 main 的提交和正式标签重新构建，不直接把 Beta Release 改为正式版。
-6. 发布后重新读取远端，检查完整 tag、与 tag 完全一致的 title、tag 指向、渠道、非草稿状态和 Latest，再核对附件名、上传状态、大小及 SHA-256（优先服务端摘要，不可用时下载校验）。上传或发布失败时报告实际远端状态，不能只凭本地标签、推送或脚本计划声称发布完成。
+6. 发布后重新读取远端，检查完整 tag、与 tag 完全一致的 title、tag 指向、渠道、非草稿状态和 Latest，再逐一核对两个附件的名称、上传状态、大小及 SHA-256（优先服务端摘要，不可用时下载校验），并确认正文包含与实际附件一致的下载说明。上传或发布失败时报告实际远端状态，不能只凭本地标签、推送或脚本计划声称发布完成。
 
 GitHub CLI 参数参考：[API 与分页](https://cli.github.com/manual/gh_api)、[创建 Release](https://cli.github.com/manual/gh_release_create)、[编辑 Release](https://cli.github.com/manual/gh_release_edit)。main 发布草稿用 `--draft=false --prerelease=false --latest=true`，Beta 用 `--draft=false --prerelease=true --latest=false`，创建 Beta 草稿也显式指定 `--prerelease --latest=false`。`--verify-tag` 只检查远端标签存在，仍需核对完整提交。
 
