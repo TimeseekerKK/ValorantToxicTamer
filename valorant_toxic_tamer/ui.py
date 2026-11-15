@@ -334,7 +334,9 @@ class CategoryManagerDialog(QDialog):
         try:
             if self.window.import_worker is not None or self.window.closing:
                 raise ValueError("当前正在导入或退出，请稍后再修改类别。")
-            self.window.sender.edit(action)
+            if self.window.sender.edit(action) is False:
+                self.status_label.setText("类别未变化，未重复保存，发送进度保持不变。")
+                return False
         except (OSError, ValueError) as exc:
             dialog = QMessageBox(QMessageBox.Icon.Warning, "类别未保存", str(exc),
                                  QMessageBox.StandardButton.Ok, self)
@@ -1030,7 +1032,9 @@ class MainWindow(QMainWindow):
         if self.import_worker is not None or self.closing:
             return False
         try:
-            self.sender.edit(action)
+            if self.sender.edit(action) is False:
+                self.result_label.setText("内容未变化，未重复保存，发送进度保持不变。")
+                return False
             self.reload_messages(row)
             self.result_label.setText("已自动保存。修改消息会重置受影响类别和全部消息的进度；其他类别保留进度。")
             return True
@@ -1062,7 +1066,7 @@ class MainWindow(QMainWindow):
             return
         category = self.messages.category_name(self.messages.category_for(row))
         dialog = MessageDialog(self, "编辑消息", self.messages.messages[row], row,
-                               hint=f"所属类别：{category}\n保存后，受影响类别和全部消息从第一条开始。",
+                               hint=f"所属类别：{category}\n内容变化并保存后，受影响类别和全部消息从第一条开始。",
                                confirm_text="保存消息")
         accepted = dialog.exec() == QDialog.DialogCode.Accepted
         text = dialog.input.text().strip()

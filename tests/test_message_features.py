@@ -83,6 +83,23 @@ class MessageFeatureTests(unittest.TestCase):
         dialog.input.setText(text)
         dialog.accept()
 
+    def test_unchanged_edit_preserves_progress_selection_and_list_items(self):
+        self.messages.advance()
+        self.window.reload_messages(2)
+        item = self.window.list_widget.item(2)
+        before = self.messages.path.read_bytes()
+        with patch.object(MessageDialog, "exec", return_value=QDialog.DialogCode.Accepted), \
+                patch.object(self.window, "reload_messages") as reload_messages, \
+                patch("valorant_toxic_tamer.message_manager.atomic_json") as save:
+            self.window.edit_message()
+            save.assert_not_called()
+            reload_messages.assert_not_called()
+        self.assertEqual(self.messages.position, 1)
+        self.assertEqual(self.window.list_widget.currentRow(), 2)
+        self.assertIs(self.window.list_widget.item(2), item)
+        self.assertEqual(self.messages.path.read_bytes(), before)
+        self.assertIn("未变化", self.window.result_label.text())
+
     def test_imported_long_messages_survive_edit_and_save_without_truncation(self):
         for text in ("x" * 40000, "汉😀" * 20000):
             with self.subTest(characters=len(text)):
