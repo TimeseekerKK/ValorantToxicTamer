@@ -173,7 +173,8 @@ def plan(snapshot, current, *, level=None, promote=None, resume=None, expected_c
         source = {"tag": promote, "commit": remote[promote]}
         reason = "promote-without-another-bump"
     else:
-        if current_beta is not None and tag_text(current_base, current_beta) not in published:
+        if (current_beta is not None and current_base > stable
+                and tag_text(current_base, current_beta) not in published):
             raise ValueError("Current Beta is not published; use --resume for an unfinished batch.")
         if branch == "main":
             if current_beta is not None:

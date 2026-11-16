@@ -22,7 +22,8 @@ def check(path):
     if "valorant_toxic_tamer.data_migration" not in modules:
         raise RuntimeError("打包缺少个人数据迁移模块。")
     if not {"valorant_toxic_tamer.entrypoint", "valorant_toxic_tamer.update_process",
-            "valorant_toxic_tamer.update_protocol", "valorant_toxic_tamer.updater"}.issubset(modules):
+            "valorant_toxic_tamer.update_protocol", "valorant_toxic_tamer.update_manifest",
+            "valorant_toxic_tamer.update_settings", "valorant_toxic_tamer.updater"}.issubset(modules):
         raise RuntimeError("打包缺少独立检查更新进程所需的模块。")
     if not {"truststore", "truststore._api", "truststore._windows"}.issubset(modules):
         raise RuntimeError("打包缺少 Windows 原生 HTTPS 证书验证所需的 truststore。")

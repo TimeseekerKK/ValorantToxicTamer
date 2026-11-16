@@ -54,6 +54,15 @@ class UpdateUITests(unittest.TestCase):
             QTest.qWait(10)
         self.assertTrue(condition())
 
+    def test_manual_download_page_is_available_after_failed_check(self):
+        with patch("valorant_toxic_tamer.update_process.check_for_update", side_effect=OSError("offline")):
+            self.window.update_button.click()
+            self.wait_until(lambda: not self.updater.busy)
+        from valorant_toxic_tamer.update_settings import RELEASES_PAGE
+        with patch("valorant_toxic_tamer.ui.QDesktopServices.openUrl", return_value=True) as open_url:
+            self.window.update_download_page.click()
+            self.assertEqual(open_url.call_args.args[0].toString(), RELEASES_PAGE)
+
     def test_no_declines_without_download_or_exit_and_exact_modal(self):
         def decline(dialog):
             self.assertEqual(dialog.text(), "发现新版本,是否更新")
@@ -144,7 +153,7 @@ class UpdateUITests(unittest.TestCase):
             self.window.update_button.click()
             self.wait_until(lambda: not self.updater.busy)
             self.assertIn("HTTPS 证书校验失败", self.window.error.call_args.args[0])
-            self.assertEqual(self.window.result_label.text(), "检查更新失败。")
+            self.assertIn("暂时无法确认最新版本", self.window.result_label.text())
             self.assertTrue(self.window.update_button.isEnabled())
             download.assert_not_called()
         self.ready.assert_not_called()
@@ -163,7 +172,7 @@ class UpdateUITests(unittest.TestCase):
         with patch("valorant_toxic_tamer.update_process.check_for_update", side_effect=lookup) as lookup_mock, \
                 patch.object(self.window, "information"):
             self.window.update_button.click()
-            QTest.qWait(50)
+            self.wait_until(lambda: lookup_mock.call_count == 1)
             self.assertFalse(self.window.update_button.isEnabled())
             self.assertFalse(self.window.update_channel.isEnabled())
             self.assertTrue(self.window.update_button.animation.isActive())
