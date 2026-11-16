@@ -369,7 +369,7 @@ class DesignUITests(unittest.TestCase):
         self.window.update_channel.setCurrentIndex(self.window.update_channel.findData("beta"))
         self.app.processEvents()
         scroll = self.window.tabs.widget(1).findChild(QScrollArea)
-        for control in (self.window.update_channel, self.window.update_button):
+        for control in (self.window.update_channel, self.window.update_button, self.window.update_download_page):
             scroll.ensureWidgetVisible(control)
             self.app.processEvents()
             top_left = control.mapTo(scroll.viewport(), control.rect().topLeft())

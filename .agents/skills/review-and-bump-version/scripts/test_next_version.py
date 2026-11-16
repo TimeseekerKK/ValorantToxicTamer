@@ -66,6 +66,10 @@ class NumberingTests(unittest.TestCase):
         data = snapshot("Beta", stable="v1.3.0", betas=["v1.3.0-beta.2"])
         self.assertEqual(nv.plan(data, "1.3.0-beta.2", level="patch")["tag"], "v1.3.1-beta.1")
 
+    def test_unpublished_placeholder_in_closed_line_can_open_new_line(self):
+        data = snapshot("Beta", stable="v1.7.2")
+        self.assertEqual(nv.plan(data, "1.7.2-beta.1", level="minor")["tag"], "v1.8.0-beta.1")
+
     def test_legacy_bare_beta_migrates_to_sequence_one(self):
         data = snapshot("Beta", betas=["v1.3.0-beta"])
         self.assertEqual(nv.plan(data, "1.3.0", level="patch")["tag"], "v1.3.0-beta.1")

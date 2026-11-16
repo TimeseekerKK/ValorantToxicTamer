@@ -1,9 +1,8 @@
-"""GitHub Release lookup, verified staging and a detached Windows updater."""
+"""Static update lookup, verified staging and a detached Windows updater."""
 import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import ssl
 import subprocess
@@ -12,25 +11,23 @@ import tempfile
 import threading
 import time
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 import truststore
 
 from .app_version import VERSION
-from .update_settings import UPDATE_CHANNELS
+from .update_settings import CACHE_SECONDS, MANIFEST_URL, REPOSITORY, UPDATE_CHANNELS
+from .update_manifest import validate_manifest
+from .config_manager import atomic_json
 from .update_protocol import Release, installed_executable, version_tuple
 
 
-REPOSITORY = "TimeseekerKK/ValorantToxicTamer"
-LATEST_URL = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
-RELEASES_URL = f"https://api.github.com/repos/{REPOSITORY}/releases"
 EXE_NAME = "ValorantToxicTamer.exe"
 
 
 def _open_update_url(request):
     # Use Windows chain building, including intermediate certificate retrieval,
-    # for both the API request and redirected release downloads.
+    # for both the manifest request and redirected release downloads.
     context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     try:
         return urlopen(request, timeout=20, context=context)
@@ -45,79 +42,63 @@ def _open_update_url(request):
         raise
 
 
-def _release_json(url):
-    request = Request(url, headers={
-        "Accept": "application/vnd.github+json", "User-Agent": f"ValorantToxicTamer/{VERSION}",
+def _manifest_json(cache_path=None):
+    if cache_path is not None:
+        try:
+            cached = json.loads(cache_path.read_text(encoding="utf-8"))
+            age = time.time() - cached["fetched_at"]
+            if cached["source"] == MANIFEST_URL and 0 <= age < CACHE_SECONDS:
+                validate_manifest(cached["manifest"])
+                return cached["manifest"]
+        except (OSError, ValueError, TypeError, KeyError):
+            pass
+    request = Request(MANIFEST_URL, headers={
+        "Accept": "application/json", "User-Agent": f"ValorantToxicTamer/{VERSION}",
     })
+    # Retry transient connection failures once; certificate and HTTP errors do not retry.
+    for attempt in range(2):
+        try:
+            with _open_update_url(request) as response:
+                raw = response.read(65537)
+            break
+        except HTTPError as exc:
+            raise ValueError(
+                f"暂时无法获取更新清单（HTTP {exc.code}），请稍后重试或打开下载页手动更新。"
+            ) from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            if attempt:
+                raise ValueError("暂时无法连接更新服务，请重试或打开下载页手动更新。") from exc
+            time.sleep(0.5)
+    if len(raw) > 65536:
+        raise ValueError("更新清单过大，已停止检查。请打开下载页手动更新。")
     try:
-        with _open_update_url(request) as response:
-            return json.load(response)
-    except HTTPError as exc:
-        if exc.code == 404:
-            raise ValueError("仓库尚无可用的 Release。") from exc
-        if exc.code in (403, 429):
-            raise ValueError("GitHub 请求受限，请稍后重试。") from exc
-        raise
+        payload = json.loads(raw)
+    except (ValueError, UnicodeError) as exc:
+        raise ValueError("更新清单不是有效的 JSON，请稍后重试或打开下载页手动更新。") from exc
+    validate_manifest(payload)
+    if cache_path is not None:
+        try:
+            atomic_json(cache_path, {"source": MANIFEST_URL, "fetched_at": time.time(), "manifest": payload})
+        except OSError:
+            # Read-only installation directories must still be able to check updates.
+            pass
+    return payload
 
 
-def latest_release(current=VERSION, *, channel="stable"):
+def latest_release(current=VERSION, *, channel="stable", cache_path=None):
     if channel not in UPDATE_CHANNELS:
         raise ValueError("无法识别更新渠道。")
     current_version = version_tuple(current)
-    if channel == "beta":
-        candidates = []
-        page = 1
-        while True:
-            releases = _release_json(f"{RELEASES_URL}?per_page=100&page={page}")
-            if not isinstance(releases, list):
-                raise ValueError("GitHub 返回了无效的版本信息。")
-            for release in releases:
-                if not isinstance(release, dict) or release.get("draft"):
-                    continue
-                try:
-                    version = version_tuple(release.get("tag_name", ""))
-                except (ValueError, TypeError):
-                    continue
-                if bool(release.get("prerelease")) == (version[3] == 0):
-                    candidates.append((version, release))
-            if len(releases) < 100:
-                break
-            page += 1
-        if not candidates:
-            raise ValueError("仓库尚无可用的正式版或 Beta Release。")
-        payload = max(candidates, key=lambda item: item[0])[1]
-    else:
-        payload = _release_json(LATEST_URL)
-    if not isinstance(payload, dict):
-        raise ValueError("GitHub 返回了无效的版本信息。")
-    tag = payload.get("tag_name", "")
-    if payload.get("draft") or (channel == "stable" and payload.get("prerelease")):
-        raise ValueError("最新版本不是正式 Release。")
-    target_version = version_tuple(tag)
-    # Only an explicit switch from a Beta to the stable channel permits rollback.
+    releases = validate_manifest(_manifest_json(cache_path))
+    candidates = [releases["stable"]]
+    if channel == "beta" and "beta" in releases:
+        candidates.append(releases["beta"])
+    release = max(candidates, key=lambda item: version_tuple(item.version))
+    target_version = version_tuple(release.version)
     rollback_to_stable = channel == "stable" and current_version[3] == 0
     if target_version == current_version or (target_version < current_version and not rollback_to_stable):
         return None
-    assets = [asset for asset in payload.get("assets", [])
-              if asset.get("state") == "uploaded" and asset.get("name", "").lower().endswith(".exe")]
-    installer_name = f"ValorantToxicTamer-Setup-{tag}.exe"
-    exact = [asset for asset in assets if asset["name"].casefold() == installer_name.casefold()]
-    if len(exact) == 1:
-        asset = exact[0]
-    else:
-        raise ValueError(f"目标版本未提供安装包 {installer_name}，请前往发布页手动安装该版本。")
-    url = asset.get("browser_download_url", "")
-    parsed = urlsplit(url)
-    if (parsed.scheme != "https" or parsed.netloc != "github.com"
-            or not parsed.path.startswith(f"/{REPOSITORY}/releases/download/")):
-        raise ValueError("更新文件地址不属于本项目的 GitHub Release。")
-    size = asset.get("size")
-    if type(size) is not int or size <= 0:
-        raise ValueError("更新文件大小无效。")
-    digest = asset.get("digest")
-    if digest is not None and not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest):
-        raise ValueError("GitHub 返回了不支持的文件校验信息。")
-    return Release(tag, url, size, digest)
+    return release
 
 
 def download_release(release, target, cancel, *, progress=lambda received, total: None, staged_path=None):

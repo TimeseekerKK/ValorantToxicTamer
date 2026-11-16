@@ -101,6 +101,29 @@ raise SystemExit(download_worker(sys.argv[1]))
                 download_update(self.release, self.target, self.cancel)
         self.assertEqual(list(self.root.iterdir()), [self.target])
 
+    def test_cancellation_survives_transient_windows_file_lock(self):
+        original_unlink = Path.unlink
+        locked = []
+
+        def unlink(path, *args, **kwargs):
+            if path.name.startswith(".vtt-update-") and not locked:
+                locked.append(path)
+                error = PermissionError("file still closing")
+                error.winerror = 32
+                raise error
+            return original_unlink(path, *args, **kwargs)
+
+        def cancel_on_progress(received, total):
+            self.cancel.set()
+
+        with self.fixture("blocked"), patch("pathlib.Path.unlink", unlink), patch(
+                "valorant_toxic_tamer.update_process.subprocess.Popen", side_effect=self.spawn):
+            with self.assertRaisesRegex(ValueError, "已取消"):
+                download_update(self.release, self.target, self.cancel, progress=cancel_on_progress)
+        self.assertEqual(len(locked), 1)
+        self.assertFalse(locked[0].exists())
+        self.assertEqual(list(self.root.iterdir()), [self.target])
+
     def test_checksum_failure_is_forwarded_and_cleaned(self):
         release = Release(self.release.version, self.release.url, self.release.size, "sha256:" + "0" * 64)
         with self.fixture("success"), patch("valorant_toxic_tamer.update_process.subprocess.Popen", side_effect=self.spawn):

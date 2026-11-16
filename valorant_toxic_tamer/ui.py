@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from PySide6.QtCore import QRect, QSize, Qt, QTimer, QThread, Slot
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPen
+from PySide6.QtCore import QRect, QSize, Qt, QTimer, QThread, QUrl, Slot
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontMetrics, QPen
 from PySide6.QtWidgets import (QDialog, QFileDialog, QFormLayout,
     QFrame, QHBoxLayout, QHeaderView, QLabel, QListWidget, QListWidgetItem, QMainWindow,
     QMessageBox, QProgressBar, QScrollArea, QSizePolicy, QStackedWidget, QStyle,
@@ -13,7 +13,7 @@ from .message_manager import (ALL_CATEGORY, UNCATEGORIZED, CATEGORY_MODES,
 from .app_version import VERSION
 from .tray import app_icon
 from .update_controller import UpdateController
-from .update_settings import UPDATE_CHANNELS
+from .update_settings import RELEASES_PAGE, UPDATE_CHANNELS
 from .ui_theme import (MUTED, RED, TEXT, CutButton, CutComboBox, CutLineEdit,
                       CutTabBar, MessageDialog, Panel, TacticalCheckBox, style_for_font_size,
                       style_message_box, UpdateButton)
@@ -827,7 +827,11 @@ class MainWindow(QMainWindow):
         update_actions = QHBoxLayout()
         update_actions.addWidget(self.update_button, 1)
         update_actions.addWidget(self.cancel_update_button)
+        self.update_download_page = CutButton("打开下载页")
+        self.update_download_page.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl(RELEASES_PAGE)))
         about.addLayout(update_actions)
+        about.addWidget(self.update_download_page)
         about.addWidget(self.update_progress)
         about.addWidget(separator())
         about.addWidget(label("本地数据", "section"))

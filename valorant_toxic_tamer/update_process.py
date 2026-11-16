@@ -23,6 +23,18 @@ def _stop_process(process):
         process.wait()
 
 
+def _remove_staged(path):
+    # A terminated Windows worker's file can remain briefly locked while handles close.
+    for attempt in range(21):
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except PermissionError as exc:
+            if getattr(exc, "winerror", None) not in (32, 33) or attempt == 20:
+                raise
+            time.sleep(0.05)
+
+
 def worker_command(channel, result_path):
     arguments = ["--check-update-worker", channel, str(result_path)]
     if getattr(sys, "frozen", False):
@@ -129,7 +141,7 @@ def download_update(release, target, cancel, *, progress=lambda received, total:
         return staged
     finally:
         if not completed:
-            staged.unlink(missing_ok=True)
+            _remove_staged(staged)
 
 
 def download_worker(manifest):
@@ -164,7 +176,8 @@ def check_worker(channel, result_path):
 
     try:
         from .updater import latest_release
-        release = latest_release(channel=channel)
+        from .config_manager import data_directory
+        release = latest_release(channel=channel, cache_path=data_directory() / "update_cache.json")
         result = {"release": asdict(release) if release is not None else None, "error": None}
         status = 0
     except Exception as exc:

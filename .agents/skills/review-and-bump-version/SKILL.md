@@ -120,6 +120,8 @@ description: 在 ValorantToxicTamer 完成软件改动后自动审核、升版�
 5. 重试先使用 `--resume` 原目标，已有标签需传 `--expected-commit`。结果 `status=published` 只代表元数据匹配，仍须核实附件；草稿补齐缺项后再发布。同名已发布内容不匹配则停止，不擅自覆盖附件、使用 `--clobber`、删除 Release 或切换渠道。Beta 晋升用 main 的提交和正式标签重新构建，不直接把 Beta Release 改为正式版。
 6. 发布后重新读取远端，检查完整 tag、与 tag 完全一致的 title、tag 指向、渠道、非草稿状态和 Latest，再逐一核对两个附件的名称、上传状态、大小及 SHA-256（优先服务端摘要，不可用时下载校验），并确认正文包含与实际附件一致的下载说明。上传或发布失败时报告实际远端状态，不能只凭本地标签、推送或脚本计划声称发布完成。
 
+7. **发布静态更新清单**：Release 附件核验成功后，在含 `scripts/publish_update_manifest.py` 的当前工作区运行 `.\.venv\Scripts\python.exe -B scripts/publish_update_manifest.py --publish`。工具分页读取已发布 Release，生成包含最新正式版和 Beta 安装包地址、大小、SHA-256 的清单，推送独立 `gh-pages` 分支，不切换源码分支、不强推。缺失安装包、摘要无效或版本倒退时停止；旧附件没有服务端摘要时下载校验后生成。首次启用 Pages 从 `gh-pages` 根目录发布，已存在其它站点配置时不得自动覆盖。等待 Pages 构建成功，并读取 `https://timeseekerkk.github.io/ValorantToxicTamer/updates.json` 核实公开内容与本次 Release 一致；不能只凭推送成功宣称更新源已生效。清单发布失败须单独报告，重试复用同一 Release，不能再升版。此工具只用于发布已核验的正式版或 Beta，不向清单加入草稿，不把 API Token 写入客户端或清单。
+
 GitHub CLI 参数参考：[API 与分页](https://cli.github.com/manual/gh_api)、[创建 Release](https://cli.github.com/manual/gh_release_create)、[编辑 Release](https://cli.github.com/manual/gh_release_edit)。main 发布草稿用 `--draft=false --prerelease=false --latest=true`，Beta 用 `--draft=false --prerelease=true --latest=false`，创建 Beta 草稿也显式指定 `--prerelease --latest=false`。`--verify-tag` 只检查远端标签存在，仍需核对完整提交。
 
 ## 验证与交付

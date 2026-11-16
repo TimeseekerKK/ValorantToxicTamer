@@ -11,7 +11,7 @@ from urllib.error import HTTPError, URLError
 
 import truststore
 
-from valorant_toxic_tamer.updater import (EXE_NAME, LATEST_URL, RELEASES_URL, REPOSITORY, Release, download_release,
+from valorant_toxic_tamer.updater import (EXE_NAME, MANIFEST_URL, REPOSITORY, Release, download_release,
                      installed_executable, latest_release, launch_installer, version_tuple)
 
 
@@ -30,11 +30,19 @@ class UpdaterTests(unittest.TestCase):
         self.payload = dict(tag_name="v1.1.0", prerelease=False, draft=False, assets=[self.asset])
         self.release = Release("v1.1.0", self.url, len(self.content), self.asset["digest"])
 
-    def lookup(self, current="1.0.0"):
-        response = io.BytesIO(json.dumps(self.payload).encode())
+    def manifest(self, beta=None):
+        def entry(payload):
+            asset = payload["assets"][0]
+            return dict(version=payload["tag_name"], url=asset["browser_download_url"],
+                        size=asset["size"], digest=asset["digest"])
+        return {"schema": 1, "channels": {"stable": entry(self.payload), "beta": beta}}
+
+    def lookup(self, current="1.0.0", *, channel="stable", beta=None):
+        response = io.BytesIO(json.dumps(self.manifest(beta)).encode())
         with patch("valorant_toxic_tamer.updater.urlopen", return_value=response) as request:
-            result = latest_release(current)
-        self.assertEqual(request.call_args.args[0].full_url, LATEST_URL)
+            result = latest_release(current, channel=channel)
+        self.assertEqual(request.call_args.args[0].full_url, MANIFEST_URL)
+        self.assertNotIn("api.github.com", request.call_args.args[0].full_url)
         self.assert_verified_context(request)
         return result
 
@@ -55,109 +63,97 @@ class UpdaterTests(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 version_tuple(invalid)
 
+    def beta_entry(self, tag):
+        item = self.manifest()["channels"]["stable"].copy()
+        item["version"] = tag
+        item["url"] = f"https://github.com/{REPOSITORY}/releases/download/{tag}/ValorantToxicTamer-Setup-{tag}.exe"
+        return item
+
     def test_beta_can_switch_back_to_latest_stable_but_stable_never_downgrades(self):
         self.assertEqual(self.lookup("1.1.0-beta.2"), self.release)
         self.assertEqual(self.lookup("1.2.0-beta.1"), self.release)
         self.assertIsNone(self.lookup("1.2.0"))
 
-    def beta_lookup(self, releases, current="1.0.0"):
-        if isinstance(releases, list):
-            releases = [dict(item, assets=[dict(asset,
-                name=f"ValorantToxicTamer-Setup-{item.get('tag_name')}.exe")
-                for asset in item.get("assets", [])]) for item in releases]
-        response = io.BytesIO(json.dumps(releases).encode())
-        with patch("valorant_toxic_tamer.updater.urlopen", return_value=response) as request:
-            result = latest_release(current, channel="beta")
-        self.assertEqual(request.call_args.args[0].full_url, f"{RELEASES_URL}?per_page=100&page=1")
-        self.assert_verified_context(request)
-        return result
+    def test_channels_choose_highest_version_and_stable_ignores_beta(self):
+        beta = self.beta_entry("v1.2.0-beta.10")
+        self.assertEqual(self.lookup(channel="beta", beta=beta).version, beta["version"])
+        self.assertEqual(self.lookup(beta=beta), self.release)
+        self.assertIsNone(self.lookup("1.2.0", channel="beta", beta=beta))
+        self.assertEqual(self.lookup(channel="beta"), self.release)
+        self.assertEqual(self.lookup(channel="beta", beta=self.beta_entry("v1.1.0-beta.10")), self.release)
 
-    def test_beta_channel_compares_numeric_versions_and_excludes_drafts_and_other_previews(self):
-        releases = [dict(self.payload, tag_name="v1.2.0-beta.2", prerelease=True),
-                    dict(self.payload, tag_name="v1.2.0-beta.10", prerelease=True),
-                    dict(self.payload, tag_name="v9.0.0-beta.1", prerelease=True, draft=True),
-                    dict(self.payload, tag_name="v9.0.0-rc.1", prerelease=True),
-                    dict(self.payload, tag_name="invalid"), dict(self.payload, tag_name=None),
-                    dict(self.payload, tag_name="v8.0.0", prerelease=True),
-                    dict(self.payload, tag_name="v8.0.0-beta.1", prerelease=False), self.payload]
-        self.assertEqual(self.beta_lookup(releases).version, "v1.2.0-beta.10")
-        self.assertIsNone(self.beta_lookup(releases, current="1.2.0"))
+    def test_newer_release_and_same_version(self):
+        self.assertEqual(self.lookup(), self.release)
+        self.assertIsNone(self.lookup("1.1.0"))
 
-    def test_beta_channel_prefers_same_base_stable_and_falls_back_to_stable(self):
-        releases = [dict(self.payload, tag_name="v1.1.0-beta.10", prerelease=True), self.payload]
-        self.assertEqual(self.beta_lookup(releases), self.release)
-        self.assertEqual(self.beta_lookup([self.payload]), self.release)
-        self.assertIsNone(self.beta_lookup([self.payload], current="1.1.0"))
-
-    def test_beta_channel_reads_all_pages_before_selecting_newest_version(self):
-        pages = [io.BytesIO(json.dumps([self.payload] * 100).encode()),
-                 io.BytesIO(json.dumps([dict(self.payload, tag_name="v1.3.0-beta.1", prerelease=True,
-                    assets=[dict(self.asset, name="ValorantToxicTamer-Setup-v1.3.0-beta.1.exe")])]).encode())]
-        with patch("valorant_toxic_tamer.updater.urlopen", side_effect=pages) as request:
-            result = latest_release("1.0.0", channel="beta")
-        self.assertEqual(result.version, "v1.3.0-beta.1")
-        self.assertEqual([call.args[0].full_url for call in request.call_args_list],
-                         [f"{RELEASES_URL}?per_page=100&page={page}" for page in (1, 2)])
-
-    def test_invalid_channel_empty_beta_and_malformed_response_are_reported(self):
+    def test_invalid_channel_does_not_make_network_request(self):
         with patch("valorant_toxic_tamer.updater.urlopen") as network:
             with self.assertRaisesRegex(ValueError, "渠道"):
                 latest_release(channel="unknown")
             network.assert_not_called()
-        for payload in ([], [dict(self.payload, draft=True)], {}):
-            with self.subTest(payload=payload), self.assertRaises(ValueError):
-                self.beta_lookup(payload)
 
-    def test_newer_release_selects_expected_exe(self):
-        self.payload["assets"] += [dict(self.asset, name="uninstaller.exe"),
-                                  dict(self.asset, name=EXE_NAME),
-                                  dict(self.asset, name="source.zip")]
-        self.assertEqual(self.lookup(), self.release)
+    def test_invalid_manifests_are_rejected_before_install(self):
+        import copy
+        payload = self.manifest()
+        variants = [[], {}, dict(payload, schema=2), dict(payload, schema=True)]
+        for field, values in {"version": [None, "v9.0.0-beta.1", "invalid"],
+                              "url": [None, "http://github.com/file.exe", self.url + "?redirect=1",
+                                      self.url.replace("github.com", "evil.test"),
+                                      self.url.replace("Setup-v1.1.0", "v1.1.0")],
+                              "size": [0, True, "5"], "digest": [None, "sha256:bad"]}.items():
+            for value in values:
+                bad = copy.deepcopy(payload)
+                bad["channels"]["stable"][field] = value
+                variants.append(bad)
+        for value in variants:
+            with self.subTest(value=value), patch("valorant_toxic_tamer.updater.urlopen",
+                    return_value=io.BytesIO(json.dumps(value).encode())), self.assertRaises(ValueError):
+                latest_release("1.0.0")
 
-    def test_same_and_older_versions_are_not_installed(self):
-        for tag in ("v1.0.0", "v0.9.9", "v1.0"):
-            self.payload.update(tag_name=tag, assets=[])
-            self.assertIsNone(self.lookup())
-
-    def test_portable_only_release_requires_manual_install(self):
-        self.asset["name"] = "ValorantToxicTamer-v1.1.0.exe"
-        with self.assertRaisesRegex(ValueError, "手动安装"):
-            self.lookup()
-
-    def test_missing_or_ambiguous_exe_is_reported(self):
-        for assets in ([], [dict(self.asset, name="source.zip")],
-                       [dict(self.asset, name="x64.exe"), dict(self.asset, name="arm64.exe")]):
-            self.payload["assets"] = assets
-            with self.assertRaisesRegex(ValueError, "安装包"):
-                self.lookup()
-
-    def test_unpublished_and_prerelease_are_rejected(self):
-        for key in ("draft", "prerelease"):
-            self.payload[key] = True
-            with self.assertRaisesRegex(ValueError, "正式"):
-                self.lookup()
-            self.payload[key] = False
-
-    def test_non_repository_url_and_invalid_size_digest_are_rejected(self):
-        for url in ("http://github.com/other", "https://evil.example/file.exe",
-                    "https://github.com/another/repo/releases/download/a/b.exe"):
-            self.asset["browser_download_url"] = url
-            with self.assertRaisesRegex(ValueError, "地址"):
-                self.lookup()
-        self.asset["browser_download_url"] = self.url
-        self.asset["size"] = 0
-        with self.assertRaisesRegex(ValueError, "大小"):
-            self.lookup()
-        self.asset["size"] = 1
-        self.asset["digest"] = "sha256:bad"
-        with self.assertRaisesRegex(ValueError, "校验"):
-            self.lookup()
-
-    def test_no_release_and_rate_limit_messages(self):
-        for code, message in ((404, "Release"), (403, "受限"), (429, "受限")):
-            with patch("valorant_toxic_tamer.updater.urlopen", side_effect=HTTPError(LATEST_URL, code, "error", {}, None)):
-                with self.assertRaisesRegex(ValueError, message):
+    def test_http_errors_are_actionable_and_do_not_retry(self):
+        for code in (404, 403, 429, 500):
+            with patch("valorant_toxic_tamer.updater.urlopen",
+                       side_effect=HTTPError(MANIFEST_URL, code, "error", {}, None)) as network:
+                with self.assertRaisesRegex(ValueError, "下载页"):
                     latest_release()
+                network.assert_called_once()
+
+    def test_connection_failure_retries_once_and_then_reports_failure(self):
+        with patch("valorant_toxic_tamer.updater.urlopen", side_effect=URLError("offline")) as network, \
+                patch("valorant_toxic_tamer.updater.time.sleep"):
+            with self.assertRaisesRegex(ValueError, "连接更新服务"):
+                latest_release()
+            self.assertEqual(network.call_count, 2)
+        with patch("valorant_toxic_tamer.updater.urlopen", side_effect=[URLError("offline"),
+                io.BytesIO(json.dumps(self.manifest()).encode())]), patch("valorant_toxic_tamer.updater.time.sleep"):
+            self.assertEqual(latest_release("1.0.0"), self.release)
+
+    def test_malformed_and_oversized_documents_are_not_used(self):
+        for raw in (b"<html>failure</html>", b"x" * 65537):
+            with patch("valorant_toxic_tamer.updater.urlopen", return_value=io.BytesIO(raw)), self.assertRaises(ValueError):
+                latest_release()
+
+    def test_cache_reuses_valid_manifest_across_channels_and_expires(self):
+        cache = self.directory / "cache.json"
+        content = json.dumps(self.manifest(self.beta_entry("v1.2.0-beta.1"))).encode()
+        with patch("valorant_toxic_tamer.updater.time.time", return_value=1000), patch(
+                "valorant_toxic_tamer.updater.urlopen", return_value=io.BytesIO(content)) as network:
+            self.assertEqual(latest_release("1.0.0", cache_path=cache), self.release)
+            self.assertEqual(latest_release("1.0.0", channel="beta", cache_path=cache).version, "v1.2.0-beta.1")
+            network.assert_called_once()
+        with patch("valorant_toxic_tamer.updater.time.time", return_value=1301), patch(
+                "valorant_toxic_tamer.updater.urlopen", side_effect=HTTPError(MANIFEST_URL, 503, "error", {}, None)):
+            with self.assertRaises(ValueError):
+                latest_release("1.0.0", cache_path=cache)
+        # An expired cache must never become a successful 'latest version' result.
+        self.assertTrue(cache.exists())
+
+    def test_corrupt_cache_or_unwritable_cache_does_not_prevent_network_check(self):
+        cache = self.directory / "cache.json"
+        cache.write_text("bad", encoding="utf-8")
+        with patch("valorant_toxic_tamer.updater.urlopen", return_value=io.BytesIO(json.dumps(self.manifest()).encode())), \
+                patch("valorant_toxic_tamer.updater.atomic_json", side_effect=PermissionError("read-only")):
+            self.assertEqual(latest_release("1.0.0", cache_path=cache), self.release)
 
     def test_download_checks_bytes_and_preserves_installed_file(self):
         with patch("valorant_toxic_tamer.updater.urlopen", return_value=io.BytesIO(self.content)) as request:
@@ -196,7 +192,10 @@ class UpdaterTests(unittest.TestCase):
 
     def test_missing_digest_uses_size_and_exe_check(self):
         self.asset["digest"] = None
-        release = self.lookup()
+        with self.assertRaisesRegex(ValueError, "SHA-256"):
+            self.lookup()
+        # Legacy download fixtures remain compatible; new feeds always require a digest.
+        release = Release(self.release.version, self.url, len(self.content), None)
         with patch("valorant_toxic_tamer.updater.urlopen", return_value=io.BytesIO(self.content)):
             self.assertTrue(download_release(release, self.target, threading.Event()).exists())
 
