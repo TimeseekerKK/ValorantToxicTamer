@@ -24,6 +24,12 @@ def compare(baseline, current):
         old = baseline["metrics"][name]
         # Runner noise must not turn tiny deltas into a failed build.
         limit = old * 1.5 + 100 if name.endswith("elapsed_ms") else old * 1.2 + 8
+        if name in ("window_hidden.elapsed_ms", "window_restored.elapsed_ms"):
+            # Releasing/resuming 20,000 rows deletes/rebuilds rendering data.
+            # Budget against the reference's 5,000-row full render, rather
+            # than treating a previously retained window as equivalent work.
+            multiplier = 2 if name == "window_hidden.elapsed_ms" else 8
+            limit = max(limit, baseline["metrics"]["load_5000.elapsed_ms"] * multiplier + 100)
         if value > limit:
             regressions.append({"metric": name, "baseline": old, "current": value, "limit": round(limit, 3)})
     return regressions

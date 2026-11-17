@@ -163,6 +163,24 @@ def run(report_path, started):
                     sample(f"update_check_{attempt}", began)
             finally:
                 update_process.worker_command = original_command
+            # Accelerate only the isolated probe's idle grace period. Compare
+            # these stages on the same runner before/after UI memory changes.
+            if hasattr(window, "background_timer"):
+                window.background_timer.setInterval(20)
+            began = time.perf_counter()
+            window.close()
+            deadline = time.monotonic() + 0.1
+            while time.monotonic() < deadline:
+                app.processEvents()
+                time.sleep(0.005)
+            sample("window_hidden", began)
+            metrics["window_hidden.rendered_items"] = management.list_widget.count()
+            began = time.perf_counter()
+            window.reveal()
+            app.processEvents()
+            sample("window_restored", began)
+            if management.list_widget.count() != controller.messages.count:
+                raise RuntimeError("Hidden-window message list did not restore")
             result["tls_not_loaded_in_gui"] = all(name not in sys.modules for name in (
                 "ssl", "truststore", "valorant_toxic_tamer.updater"))
         finally:

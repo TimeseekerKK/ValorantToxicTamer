@@ -28,6 +28,7 @@ class ManagementPage(QWidget):
         self._render_revision = -1
         self._category_signature = None
         self._items_by_key = {}
+        self._suspended_state = None
         columns = QHBoxLayout(self)
         columns.setContentsMargins(0, 16, 0, 0)
         columns.setSpacing(16)
@@ -347,8 +348,7 @@ class ManagementPage(QWidget):
         item.setToolTip(text)
         item.setData(Qt.ItemDataRole.AccessibleTextRole, f"第 {row + 1} 条：{text}")
 
-    def reload_messages(self, row=None):
-        self.sync_categories()
+    def _message_view_state(self):
         selected_keys = {item.data(Qt.ItemDataRole.UserRole + 1) for item in self.list_widget.selectedItems()}
         current = self.list_widget.currentItem()
         current_key = current.data(Qt.ItemDataRole.UserRole + 1) if current else None
@@ -356,10 +356,39 @@ class ManagementPage(QWidget):
         anchor_key = anchor.data(Qt.ItemDataRole.UserRole + 1) if anchor else None
         anchor_offset = self.list_widget.visualItemRect(anchor).top() if anchor else 0
         scroll = self.list_widget.verticalScrollBar().value()
+        return selected_keys, current_key, anchor_key, anchor_offset, scroll
+
+    def suspend_messages(self):
+        if self._suspended_state is not None:
+            return
+        self.search_timer.stop()
+        self.list_widget.layout_timer.stop()
+        self._suspended_state = self._message_view_state()
+        blocked = self.list_widget.blockSignals(True)
+        try:
+            self._items_by_key.clear()
+            self.list_widget.clear()
+            self.list_widget.itemDelegate()._sizes.clear()
+        finally:
+            self.list_widget.blockSignals(blocked)
+
+    def resume_messages(self):
+        if self._suspended_state is not None:
+            state = self._suspended_state
+            self._suspended_state = None
+            self.reload_messages(view_state=state)
+
+    def reload_messages(self, row=None, *, view_state=None):
+        if self._suspended_state is not None:
+            return  # The message library remains authoritative while hidden.
+        self.sync_categories()
+        restoring = view_state is not None
+        selected_keys, current_key, anchor_key, anchor_offset, scroll = (
+            view_state if restoring else self._message_view_state())
         self.list_widget.setUpdatesEnabled(False)
         blocked = self.list_widget.blockSignals(True)
         try:
-            incremental = self._render_revision + 1 == self.host.messages.revision
+            incremental = not restoring and self._render_revision + 1 == self.host.messages.revision
             kind, changed = self.host.messages.last_change if incremental else ("reset", ())
             if kind == "edit":
                 for index in changed:
@@ -412,6 +441,14 @@ class ManagementPage(QWidget):
                 self.update_actions()
             else:
                 self.filter_messages()
+            if restoring:
+                # Filtering may choose a fallback row; restore even an empty
+                # selection rather than selecting an unintended first item.
+                self.list_widget.clearSelection()
+                for item in surviving:
+                    item.setSelected(True)
+                if current_key is None:
+                    self.list_widget.setCurrentRow(-1)
             self.list_widget.doItemsLayout()
             anchor = self._items_by_key.get(anchor_key)
             if anchor is not None and not anchor.isHidden():
@@ -428,6 +465,8 @@ class ManagementPage(QWidget):
 
     def filter_messages(self):
         self.search_timer.stop()
+        if self._suspended_state is not None:
+            return
         query = self.search.text().strip().casefold()
         cid = self.view_category.currentData() or ALL_CATEGORY
         category_rows = set(self.host.messages.rows_for(cid))

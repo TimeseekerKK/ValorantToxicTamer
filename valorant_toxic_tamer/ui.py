@@ -1,6 +1,6 @@
 """Main window: page composition, shared status and application lifecycle."""
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMainWindow, QMessageBox,
+from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
                                QTabWidget, QVBoxLayout, QWidget)
 
 from .app_version import VERSION
@@ -59,6 +59,10 @@ class MainWindow(QMainWindow):
         self.timer = QTimer(self)
         self.timer.setInterval(100)
         self.timer.timeout.connect(self.refresh_status)
+        self.background_timer = QTimer(self)
+        self.background_timer.setSingleShot(True)
+        self.background_timer.setInterval(15000)
+        self.background_timer.timeout.connect(self._release_background_resources)
         self.management.reload_messages()
         self.apply_font_size()
         if self.messages.count:
@@ -120,7 +124,7 @@ class MainWindow(QMainWindow):
             self.management.list_widget.viewport().update()
         self.management.update_actions()
 
-        if self.isVisible() and (busy or remaining > 0):
+        if self.isVisible() and not self.isMinimized() and (busy or remaining > 0):
             if not self.timer.isActive():
                 self.timer.start()
         else:
@@ -158,16 +162,33 @@ class MainWindow(QMainWindow):
         event.ignore()
 
     def showEvent(self, event):
+        self.background_timer.stop()
         super().showEvent(event)
+        self.management.resume_messages()
         self.refresh_status()
 
     def hideEvent(self, event):
         self.timer.stop()
+        if not self.closing:
+            self.background_timer.start()
         super().hideEvent(event)
+
+    def _release_background_resources(self):
+        if self.closing or (self.isVisible() and not self.isMinimized()):
+            return
+        # Dialogs and workers may still reference the live list. Retry after
+        # they finish instead of interfering with imports or update prompts.
+        if (self.management.import_worker is not None or self.updater.busy
+                or QApplication.activeModalWidget() is not None
+                or QApplication.activePopupWidget() is not None):
+            self.background_timer.start()
+            return
+        self.management.suspend_messages()
 
     def begin_shutdown(self):
         self.closing = True
         self.timer.stop()
+        self.background_timer.stop()
         self.management.begin_shutdown()
         self.updater.begin_shutdown()
 

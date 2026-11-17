@@ -18,3 +18,18 @@ class BaselineComparisonTests(unittest.TestCase):
                         {"environment": baseline["environment"], "metrics": {"other.elapsed_ms": 10}}):
             with self.subTest(current=current), self.assertRaises(ValueError):
                 compare(baseline, current)
+
+    def test_background_restore_has_a_bounded_full_render_budget(self):
+        baseline = {"environment": {}, "metrics": {
+            "load_5000.elapsed_ms": 200, "window_hidden.elapsed_ms": 100,
+            "window_restored.elapsed_ms": 10}}
+        current = {"environment": {}, "metrics": {
+            "load_5000.elapsed_ms": 210, "window_hidden.elapsed_ms": 300,
+            "window_restored.elapsed_ms": 1000}}
+        self.assertEqual(compare(baseline, current), [])
+        current["metrics"]["window_restored.elapsed_ms"] = 1800
+        self.assertEqual([r["metric"] for r in compare(baseline, current)],
+                         ["window_restored.elapsed_ms"])
+        current["metrics"]["window_hidden.elapsed_ms"] = 600
+        self.assertEqual([r["metric"] for r in compare(baseline, current)],
+                         ["window_hidden.elapsed_ms", "window_restored.elapsed_ms"])
