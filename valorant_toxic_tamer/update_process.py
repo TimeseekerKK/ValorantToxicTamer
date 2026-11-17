@@ -9,6 +9,7 @@ import time
 
 from .update_protocol import Release
 from .config_manager import atomic_json
+from .update_files import preflight_download, mark_task, cleanup_update_files
 
 
 def _stop_process(process):
@@ -82,12 +83,14 @@ def download_worker_command(manifest):
     return [sys.executable, str(Path(__file__).resolve().parents[1] / "main.py"), *arguments]
 
 
-def download_update(release, target, cancel, *, progress=lambda received, total: None, timeout=630):
+def download_update(release, target, cancel, *, progress=lambda received, total: None, timeout=630,
+                    phase=lambda stage: None):
     """Own the staging path so terminating a blocked download leaves no partial EXE."""
     from dataclasses import asdict
 
     if cancel.is_set():
         raise ValueError("更新已取消。")
+    preflight_download(target, release.size)
     with tempfile.NamedTemporaryFile(dir=target.parent, prefix=".vtt-update-",
                                      suffix=".exe", delete=False) as stream:
         staged = Path(stream.name)
@@ -95,6 +98,7 @@ def download_update(release, target, cancel, *, progress=lambda received, total:
     try:
         with tempfile.TemporaryDirectory(prefix=".vtt-download-", dir=target.parent) as directory:
             root = Path(directory)
+            mark_task(root, staged=staged)
             manifest = root / "download.json"
             atomic_json(manifest, {"release": asdict(release), "target": str(target), "staged": str(staged)})
             environment = dict(os.environ)
@@ -103,18 +107,23 @@ def download_update(release, target, cancel, *, progress=lambda received, total:
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 env=environment, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
             last_progress = None
+            last_phase = None
 
             def report_progress():
-                nonlocal last_progress
+                nonlocal last_progress, last_phase
                 try:
                     payload = json.loads((root / "progress.json").read_text(encoding="utf-8"))
                     received, total = payload["received"], payload["total"]
                 except (OSError, ValueError, KeyError, TypeError):
                     return
-                if (type(received) is int and total == release.size and
-                        0 <= received <= total and received != last_progress):
-                    last_progress = received
-                    progress(received, total)
+                if type(received) is int and total == release.size and 0 <= received <= total:
+                    stage = payload.get("phase", "download")
+                    if stage in ("download", "retry", "verify") and stage != last_phase:
+                        last_phase = stage
+                        phase(stage)
+                    if received != last_progress:
+                        last_progress = received
+                        progress(received, total)
 
             try:
                 deadline = time.monotonic() + timeout
@@ -151,19 +160,29 @@ def download_worker(manifest):
 
     root = Path(manifest).parent
     last_report = 0.0
+    current_phase = "download"
+    latest_bytes = (0, 1)
 
     def progress(received, total):
-        nonlocal last_report
+        nonlocal last_report, latest_bytes
+        latest_bytes = (received, total)
         now = time.monotonic()
         if received not in (0, total) and now - last_report < 0.1:
             return
-        atomic_json(root / "progress.json", {"received": received, "total": total})
+        atomic_json(root / "progress.json", {"received": received, "total": total, "phase": current_phase})
         last_report = now
+
+    def phase(stage):
+        nonlocal current_phase, last_report
+        current_phase = stage
+        last_report = 0.0
+        progress(*latest_bytes)
 
     try:
         payload = json.loads(Path(manifest).read_text(encoding="utf-8"))
+        latest_bytes = (0, payload["release"]["size"])
         download_release(Release(**payload["release"]), Path(payload["target"]), threading.Event(),
-                         progress=progress, staged_path=Path(payload["staged"]))
+                         progress=progress, staged_path=Path(payload["staged"]), phase=phase)
         error = None
     except Exception as exc:
         error = str(exc)
@@ -177,6 +196,7 @@ def check_worker(channel, result_path):
     try:
         from .updater import latest_release
         from .config_manager import data_directory
+        cleanup_update_files(data_directory().parent)
         release = latest_release(channel=channel, cache_path=data_directory() / "update_cache.json")
         result = {"release": asdict(release) if release is not None else None, "error": None}
         status = 0

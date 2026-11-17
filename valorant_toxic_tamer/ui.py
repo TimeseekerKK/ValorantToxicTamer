@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from PySide6.QtCore import QRect, QSize, Qt, QTimer, QThread, QUrl, Slot
+from PySide6.QtCore import QRect, QSize, Qt, QTimer, QThread, QUrl, Slot, QItemSelectionModel
+from collections import OrderedDict
+import threading
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontMetrics, QPen
 from PySide6.QtWidgets import (QDialog, QFileDialog, QFormLayout,
     QFrame, QHBoxLayout, QHeaderView, QLabel, QListWidget, QListWidgetItem, QMainWindow,
@@ -9,7 +11,8 @@ from PySide6.QtWidgets import (QDialog, QFileDialog, QFormLayout,
 
 from .config_manager import DEFAULT_CONFIG, FONT_SIZES, HOTKEYS
 from .message_manager import (ALL_CATEGORY, UNCATEGORIZED, CATEGORY_MODES,
-                              deduplicate_messages, prepare_txt_import)
+                              deduplicate_messages)
+from .import_process import prepare_import as prepare_txt_import
 from .app_version import VERSION
 from .tray import app_icon
 from .update_controller import UpdateController
@@ -70,10 +73,11 @@ class MessageDelegate(QStyledItemDelegate):
         self.window = window
         self._column_key = None
         self._column_widths = None
+        self._sizes = OrderedDict()
 
     def column_widths(self):
         digits = max(2, len(str(self.window.list_widget.count())))
-        key = (self.window.list_widget.font().toString(), digits)
+        key = (self.window.config.value["font_size"], self.window.list_widget.logicalDpiX(), digits)
         if key == self._column_key:
             return self._column_widths
         metrics = self.window.list_widget.fontMetrics()
@@ -90,9 +94,18 @@ class MessageDelegate(QStyledItemDelegate):
         reserved = number + upcoming + 40
         width = max(1, self.window.list_widget.viewport().width() - reserved)
         text = index.data(Qt.ItemDataRole.UserRole) or ""
+        key = (text, self._column_key, width, reserved)
+        cached = self._sizes.get(key)
+        if cached is not None:
+            self._sizes.move_to_end(key)
+            return cached
         rect = self.window.list_widget.fontMetrics().boundingRect(
             QRect(0, 0, width, 100000), Qt.TextFlag.TextWordWrap, text)
-        return QSize(width + reserved, max(62, rect.height() + 30))
+        size = QSize(width + reserved, max(62, rect.height() + 30))
+        self._sizes[key] = size
+        if len(self._sizes) > 25000:
+            self._sizes.popitem(last=False)
+        return size
 
     def paint(self, painter, option, index):
         painter.save()
@@ -134,9 +147,16 @@ class MessageDelegate(QStyledItemDelegate):
 
 
 class MessageList(QListWidget):
+    def __init__(self):
+        super().__init__()
+        self.layout_timer = QTimer(self)
+        self.layout_timer.setSingleShot(True)
+        self.layout_timer.setInterval(60)
+        self.layout_timer.timeout.connect(self.doItemsLayout)
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.doItemsLayout()
+        self.layout_timer.start()
 
 
 class WrappingLabel(QLabel):
@@ -169,10 +189,11 @@ class ImportWorker(QThread):
         self.path, self.existing = path, existing
         self.preview = None
         self.error = None
+        self.cancel = threading.Event()
 
     def run(self):
         try:
-            self.preview = prepare_txt_import(self.path, self.existing)
+            self.preview = prepare_txt_import(self.path, self.existing, self.cancel)
         except Exception as exc:
             self.error = str(exc)
 
@@ -295,7 +316,7 @@ class CategoryManagerDialog(QDialog):
             name.setData(Qt.ItemDataRole.UserRole, cid)
             name.setToolTip(category["name"])
             self.table.setItem(row, 0, name)
-            count = QTableWidgetItem(str(len(manager.rows_for(cid))))
+            count = QTableWidgetItem(str(manager.category_count(cid)))
             count.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(row, 1, count)
             if cid in (ALL_CATEGORY, UNCATEGORIZED):
@@ -405,6 +426,9 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(840, 638)
         self.setStyleSheet(style_for_font_size(config.value["font_size"]))
         self.next_index = -1
+        self._render_revision = -1
+        self._category_signature = None
+        self._items_by_key = {}
         root = QWidget()
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
@@ -439,7 +463,7 @@ class MainWindow(QMainWindow):
         self.timer.timeout.connect(self.refresh_status)
         self.reload_messages()
         self.apply_font_size()
-        if self.messages.messages:
+        if self.messages.count:
             self.result_label.setText("就绪 · 在游戏前台使用快捷键，按顺序输入下一条消息。")
         if self.updater.preferences_error:
             self.result_label.setText("更新设置无法读取，暂用正式版渠道；可在设置页恢复。消息管理和快捷发送仍可使用。")
@@ -551,6 +575,9 @@ class MainWindow(QMainWindow):
         self.import_button = self.button("导入消息", self.import_txt)
         toolbar.addWidget(self.add_button)
         toolbar.addWidget(self.import_button)
+        self.cancel_import_button = self.button("取消导入", self.cancel_import)
+        self.cancel_import_button.hide()
+        toolbar.addWidget(self.cancel_import_button)
         manage_layout.addLayout(toolbar)
         category_bar = QHBoxLayout()
         category_bar.addWidget(label("筛选消息"))
@@ -637,7 +664,9 @@ class MainWindow(QMainWindow):
     def sync_categories(self):
         categories = [{"id": ALL_CATEGORY, "name": "全部消息"}] + self.messages.categories
         selected = self.messages.selected_categories
-        for combo, values in ((self.view_category, categories), (self.move_category, categories[1:])):
+        signature = tuple((c["id"], c["name"]) for c in categories)
+        structure_changed = signature != self._category_signature
+        for combo, values in ((self.view_category, categories), (self.move_category, categories[1:])) if structure_changed else ():
             current = combo.currentData()
             blocked = combo.blockSignals(True)
             try:
@@ -650,22 +679,34 @@ class MainWindow(QMainWindow):
                 combo.blockSignals(blocked)
         blocked = self.send_categories.blockSignals(True)
         try:
-            self.send_categories.clear()
-            for category in categories:
+            if structure_changed:
+                existing = {self.send_categories.item(row).data(Qt.ItemDataRole.UserRole):
+                            self.send_categories.item(row) for row in range(self.send_categories.count())}
+                wanted = {category["id"] for category in categories}
+                for row in reversed(range(self.send_categories.count())):
+                    if self.send_categories.item(row).data(Qt.ItemDataRole.UserRole) not in wanted:
+                        self.send_categories.takeItem(row)
+                for category in categories:
+                    if category["id"] not in existing:
+                        item = QListWidgetItem()
+                        item.setData(Qt.ItemDataRole.UserRole, category["id"])
+                        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                        self.send_categories.addItem(item)
+            orders = {cid: order for order, cid in enumerate(selected, 1)}
+            for row, category in enumerate(categories):
                 cid = category["id"]
-                order = selected.index(cid) + 1 if cid in selected else None
-                item = QListWidgetItem(f"{category['name']} ({len(self.messages.rows_for(cid))})")
-                item.setData(Qt.ItemDataRole.UserRole, cid)
+                order = orders.get(cid)
+                item = self.send_categories.item(row)
+                item.setText(f"{category['name']} ({self.messages.category_count(cid)})")
                 item.setData(CategoryOrderDelegate.ORDER_ROLE, order)
                 item.setData(Qt.ItemDataRole.AccessibleDescriptionRole,
                              f"发送顺序 {order}" if order is not None else "未参与发送")
                 item.setToolTip(category["name"])
-                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                 item.setCheckState(Qt.CheckState.Checked if cid in selected else Qt.CheckState.Unchecked)
-                self.send_categories.addItem(item)
         finally:
             self.send_categories.blockSignals(blocked)
         self.update_send_order()
+        self._category_signature = signature
 
     def update_send_order(self):
         names = [self.messages.category_name(cid) for cid in self.messages.selected_categories]
@@ -674,6 +715,7 @@ class MainWindow(QMainWindow):
         self.send_order_label.setToolTip(order)
 
     def send_category_changed(self, item):
+        rendered = self._render_revision == self.messages.revision
         cid = item.data(Qt.ItemDataRole.UserRole)
         selected = self.messages.selected_categories
         checked = item.checkState() == Qt.CheckState.Checked
@@ -688,6 +730,8 @@ class MainWindow(QMainWindow):
             self.sender.edit(lambda: self.messages.select_categories(selected))
         except (OSError, ValueError) as exc:
             self.error(exc)
+        if rendered:
+            self._render_revision = self.messages.revision
         self.sync_categories()
         self.refresh_status()
 
@@ -927,18 +971,21 @@ class MainWindow(QMainWindow):
         rows = self.selected_rows()
         selected = row >= 0 and row in rows and len(rows) == 1
         cid = self.view_category.currentData() or ALL_CATEGORY
-        category_rows = self.messages.rows_for(cid)
+        category_count = self.messages.category_count(cid)
         self.add_button.setEnabled(idle)
         self.import_button.setEnabled(idle)
         self.edit_button.setEnabled(idle and selected)
-        self.delete_button.setEnabled(idle and selected)
-        self.clear_button.setEnabled(idle and bool(category_rows))
+        self.delete_button.setEnabled(idle and bool(rows))
+        self.clear_button.setEnabled(idle and bool(category_count))
         # Reordering a filtered subset would obscure the actual adjacent message.
         filtered = bool(self.search.text().strip())
-        offset = category_rows.index(row) if row in category_rows else -1
+        offset = self.messages.category_offset(cid, row)
         self.up_button.setEnabled(idle and selected and offset > 0 and not filtered)
-        self.down_button.setEnabled(idle and selected and 0 <= offset < len(category_rows) - 1 and not filtered)
-        self.export_button.setEnabled(idle and bool(category_rows))
+        self.down_button.setEnabled(idle and selected and 0 <= offset < category_count - 1 and not filtered)
+        self.export_button.setEnabled(idle and bool(category_count))
+        importing = self.import_worker is not None and self.import_worker.isRunning()
+        self.cancel_import_button.setVisible(importing)
+        self.cancel_import_button.setEnabled(importing and not self.import_worker.cancel.is_set())
         self.assign_category_button.setEnabled(idle and bool(rows))
         self.batch_category_bar.setVisible(bool(rows))
         self.selected_count_label.setText(f"已选 {len(rows)} 条 · 所属类别")
@@ -955,13 +1002,12 @@ class MainWindow(QMainWindow):
 
     def refresh_status(self):
         with self.sender.lock:
-            count, index = self.messages.current_count, self.messages.position
-            cid = self.messages.current_category
+            cid, count, index, next_row, current = self.messages.current_state()
             remaining = max(0, self.sender.ready_at - self.sender.clock())
             busy = self.sender.busy
             state = ("正在输入" if busy else f"冷却 {remaining:.1f}s" if remaining
                      else "就绪" if count else "当前发送范围为空")
-            current = self.messages.current or "暂无消息"
+            current = current or "暂无消息"
         position = index + 1 if count else 0
         category = self.messages.category_name(cid) if cid else "未选择有效消息"
         self.state_label.setText(f"● {state}  |  {position} / {count}\n{category}")
@@ -972,7 +1018,7 @@ class MainWindow(QMainWindow):
             self.next_label.setText(current)
             self.next_label.setToolTip(current)
             self.preview_scroll.verticalScrollBar().setValue(0)
-        next_index = self.messages.current_row if count else -1
+        next_index = next_row if count else -1
         if self.next_index != next_index:
             self.next_index = next_index
             self.list_widget.viewport().update()
@@ -989,20 +1035,87 @@ class MainWindow(QMainWindow):
         if self.isVisible():
             self.refresh_status()
 
-    def reload_messages(self, row=0):
+    def _set_message_item(self, item, row):
+        text = self.messages.text_at(row)
+        item.setText(f"{row + 1:02d}   {text}")
+        item.setData(Qt.ItemDataRole.UserRole, text)
+        item.setData(Qt.ItemDataRole.UserRole + 1, self.messages.key_at(row))
+        item.setToolTip(text)
+        item.setData(Qt.ItemDataRole.AccessibleTextRole, f"第 {row + 1} 条：{text}")
+
+    def reload_messages(self, row=None):
         self.sync_categories()
+        selected_keys = {item.data(Qt.ItemDataRole.UserRole + 1) for item in self.list_widget.selectedItems()}
+        current = self.list_widget.currentItem()
+        current_key = current.data(Qt.ItemDataRole.UserRole + 1) if current else None
+        anchor = self.list_widget.itemAt(self.list_widget.viewport().rect().topLeft())
+        anchor_key = anchor.data(Qt.ItemDataRole.UserRole + 1) if anchor else None
+        anchor_offset = self.list_widget.visualItemRect(anchor).top() if anchor else 0
+        scroll = self.list_widget.verticalScrollBar().value()
         self.list_widget.setUpdatesEnabled(False)
         blocked = self.list_widget.blockSignals(True)
         try:
-            self.list_widget.clear()
-            for i, text in enumerate(self.messages.messages):
-                item = QListWidgetItem(f"{i + 1:02d}   {text}")
-                item.setData(Qt.ItemDataRole.UserRole, text)
-                item.setToolTip(text)
-                item.setData(Qt.ItemDataRole.AccessibleTextRole, f"第 {i + 1} 条：{text}")
-                self.list_widget.addItem(item)
-            self.list_widget.setCurrentRow(min(row, len(self.messages.messages) - 1))
-            self.filter_messages()
+            incremental = self._render_revision + 1 == self.messages.revision
+            kind, changed = self.messages.last_change if incremental else ("reset", ())
+            if kind == "edit":
+                for index in changed:
+                    self._set_message_item(self.list_widget.item(index), index)
+            elif kind == "append":
+                for index in range(changed[0], self.messages.count):
+                    item = QListWidgetItem()
+                    self._set_message_item(item, index)
+                    self.list_widget.addItem(item)
+                    self._items_by_key[self.messages.key_at(index)] = item
+            elif kind == "delete":
+                for index in reversed(changed):
+                    item = self.list_widget.takeItem(index)
+                    self._items_by_key.pop(item.data(Qt.ItemDataRole.UserRole + 1), None)
+                for index in range(min(changed, default=self.messages.count), self.messages.count):
+                    self._set_message_item(self.list_widget.item(index), index)
+            elif kind == "swap":
+                first, second = sorted(changed)
+                right = self.list_widget.takeItem(second)
+                left = self.list_widget.takeItem(first)
+                self.list_widget.insertItem(first, right)
+                self.list_widget.insertItem(second, left)
+                self._set_message_item(right, first)
+                self._set_message_item(left, second)
+            elif kind != "metadata":
+                self.list_widget.clear()
+                self._items_by_key.clear()
+                for index in range(self.messages.count):
+                    item = QListWidgetItem()
+                    self._set_message_item(item, index)
+                    self.list_widget.addItem(item)
+                    self._items_by_key[self.messages.key_at(index)] = item
+            self._render_revision = self.messages.revision
+            target = self._items_by_key.get(current_key)
+            surviving = [self._items_by_key[key] for key in selected_keys if key in self._items_by_key]
+            if target is None and surviving:
+                target = min(surviving, key=self.list_widget.row)
+            if target is not None:
+                self.list_widget.setCurrentItem(target, QItemSelectionModel.SelectionFlag.NoUpdate)
+            elif self.messages.count:
+                self.list_widget.setCurrentRow(min(row or 0, self.messages.count - 1))
+            if row is not None and len(selected_keys) <= 1:
+                self.list_widget.setCurrentRow(min(row, self.messages.count - 1))
+            else:
+                if surviving:
+                    self.list_widget.clearSelection()
+                    for item in surviving:
+                        item.setSelected(True)
+            if kind == "edit" and not self.search.text().strip():
+                self.update_actions()
+            else:
+                self.filter_messages()
+            self.list_widget.doItemsLayout()
+            anchor = self._items_by_key.get(anchor_key)
+            if anchor is not None and not anchor.isHidden():
+                self.list_widget.scrollToItem(anchor, QListWidget.ScrollHint.PositionAtTop)
+                self.list_widget.verticalScrollBar().setValue(
+                    self.list_widget.verticalScrollBar().value() - anchor_offset)
+            else:
+                self.list_widget.verticalScrollBar().setValue(scroll)
         finally:
             self.list_widget.blockSignals(blocked)
             self.list_widget.setUpdatesEnabled(True)
@@ -1017,14 +1130,18 @@ class MainWindow(QMainWindow):
         visible = []
         self.list_widget.setUpdatesEnabled(False)
         try:
-            for row, text in enumerate(self.messages.messages):
+            for row, (_, text) in enumerate(self.messages.iter_messages()):
                 matches = row in category_rows and (not query or query in text.casefold())
                 self.list_widget.item(row).setHidden(not matches)
                 if matches:
                     visible.append(row)
             current = self.list_widget.currentRow()
             if current not in visible:
-                self.list_widget.setCurrentRow(visible[0] if visible else -1)
+                selected = self.selected_rows()
+                if selected:
+                    self.list_widget.setCurrentItem(self.list_widget.item(selected[0]), QItemSelectionModel.SelectionFlag.NoUpdate)
+                else:
+                    self.list_widget.setCurrentRow(visible[0] if visible else -1)
         finally:
             self.list_widget.setUpdatesEnabled(True)
         count = len(category_rows)
@@ -1032,7 +1149,7 @@ class MainWindow(QMainWindow):
         self.message_stack.setCurrentIndex(1 if not count else 0 if visible else 2)
         self.update_actions()
 
-    def change(self, action, row=0):
+    def change(self, action, row=None):
         if self.import_worker is not None or self.closing:
             return False
         try:
@@ -1059,7 +1176,7 @@ class MainWindow(QMainWindow):
         cid = dialog.category.currentData()
         dialog.deleteLater()
         if accepted:
-            if self.change(lambda: self.messages.append([text], cid), len(self.messages.messages)):
+            if self.change(lambda: self.messages.append([text], cid), self.messages.count):
                 self.result_label.setText(f"消息已添加到“{self.messages.category_name(cid)}”。发送范围保持当前勾选。")
 
     def edit_message(self, *_):
@@ -1069,7 +1186,7 @@ class MainWindow(QMainWindow):
         if row < 0:
             return
         category = self.messages.category_name(self.messages.category_for(row))
-        dialog = MessageDialog(self, "编辑消息", self.messages.messages[row], row,
+        dialog = MessageDialog(self, "编辑消息", self.messages.text_at(row), row,
                                hint=f"所属类别：{category}\n内容变化并保存后，受影响类别和全部消息从第一条开始。",
                                confirm_text="保存消息")
         accepted = dialog.exec() == QDialog.DialogCode.Accepted
@@ -1079,13 +1196,16 @@ class MainWindow(QMainWindow):
             self.change(lambda: self.messages.edit_message(row, text), row)
 
     def delete_message(self):
-        row = self.list_widget.currentRow()
-        if row < 0:
+        rows = self.selected_rows()
+        if not rows:
             return
         dialog = QMessageBox(self)
         dialog.setWindowTitle("删除消息")
-        dialog.setText("确定删除选中的消息？")
-        dialog.setInformativeText(f"第 {row + 1:02d} 条：{self.messages.messages[row]}\n删除后，受影响类别和全部消息从第一条开始。")
+        dialog.setText(f"确定删除选中的 {len(rows)} 条消息？")
+        preview = "\n".join(f"第 {row + 1:02d} 条：{self.messages.text_at(row)[:120]}" for row in rows[:5])
+        if len(rows) > 5:
+            preview += f"\n另有 {len(rows) - 5} 条。"
+        dialog.setInformativeText(preview + "\n删除后自动保存，无法撤销；受影响类别和全部消息从第一条开始。")
         dialog.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         dialog.button(QMessageBox.StandardButton.Yes).setText("删除")
         dialog.button(QMessageBox.StandardButton.No).setText("取消")
@@ -1094,7 +1214,7 @@ class MainWindow(QMainWindow):
         answer = dialog.exec()
         dialog.deleteLater()
         if answer == QMessageBox.StandardButton.Yes:
-            self.change(lambda: self.messages.delete_messages([row]), row)
+            self.change(lambda: self.messages.delete_messages(rows), rows[0])
 
     def clear_messages(self):
         cid = self.view_category.currentData() or ALL_CATEGORY
@@ -1138,6 +1258,12 @@ class MainWindow(QMainWindow):
             self.update_actions()
             self.import_worker.start()
 
+    def cancel_import(self):
+        if self.import_worker is not None:
+            self.import_worker.cancel.set()
+            self.cancel_import_button.setEnabled(False)
+            self.result_label.setText("正在取消导入…")
+
     @Slot()
     def _import_prepared(self):
         worker = self.import_worker
@@ -1145,6 +1271,9 @@ class MainWindow(QMainWindow):
             return
         try:
             if self.closing:
+                return
+            if worker.cancel.is_set():
+                self.result_label.setText("已取消导入，现有消息未更改。")
                 return
             if worker.error:
                 self.error(worker.error)
@@ -1175,7 +1304,7 @@ class MainWindow(QMainWindow):
                         return False
                     self.messages.append(incoming, self.import_category)
                     return True
-                row = len(self.messages.messages)
+                row = self.messages.count
                 if self.sender.edit(append):
                     self.reload_messages(row)
                     self.result_label.setText("导入已保存，目标类别和全部消息的发送进度已重置。")
@@ -1186,10 +1315,16 @@ class MainWindow(QMainWindow):
         else:
             self.result_label.setText("已取消导入，现有消息未更改。")
 
-    def shutdown(self):
+    def begin_shutdown(self):
         self.closing = True
         self.timer.stop()
         self.search_timer.stop()
+        self.list_widget.layout_timer.stop()
+        self.cancel_import()
+        self.updater.begin_shutdown()
+
+    def shutdown(self):
+        self.begin_shutdown()
         if self.import_worker:
             self.import_worker.wait()
         self.updater.shutdown()

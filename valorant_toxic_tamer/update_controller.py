@@ -31,6 +31,7 @@ class UpdateWorker(QThread):
 class UpdateController(QObject):
     ready_to_install = Signal()
     download_progress = Signal(object, object)
+    download_phase = Signal(str)
 
     def __init__(self, window):
         super().__init__(window)
@@ -42,6 +43,8 @@ class UpdateController(QObject):
         self.stage = None
         self.target = None
         self.download_progress.connect(self._progress)
+        self.download_phase.connect(self._phase)
+        self.download_status = "download"
         # Older official versions ignore this file, so switching back remains compatible.
         self.preferences_path = window.config.path.with_name("update_settings.json")
         def validate(value):
@@ -68,8 +71,26 @@ class UpdateController(QObject):
             return
         percent = received * 100 / total
         self.window.update_progress.setValue(received * 1000 // total)
-        self.window.update_progress.setFormat(
-            f"{percent:.1f}% · {received / 2**20:.1f} / {total / 2**20:.1f} MiB")
+        if self.download_status == "download":
+            self.window.update_progress.setFormat(
+                f"{percent:.1f}% · {received / 2**20:.1f} / {total / 2**20:.1f} MiB")
+
+    @Slot(str)
+    def _phase(self, stage):
+        if self.closing or self.cancel.is_set() or self.stage != "download":
+            return
+        self.download_status = stage
+        if stage == "verify":
+            self.window.update_button.setText("校验中…")
+            self.window.update_progress.setFormat("下载完成 · 正在校验安装包…")
+            self.window.result_label.setText("正在校验安装包，完成后将准备安装…")
+        elif stage == "retry":
+            self.window.update_button.setText("重试中…")
+            self.window.update_progress.setFormat("网络中断，正在重试…")
+            self.window.result_label.setText("下载连接中断，正在重新下载（最多重试两次）…")
+        else:
+            self.window.update_button.setText("下载中…")
+            self.window.result_label.setText("正在下载更新，请稍候…")
 
     @Slot()
     def cancel_update(self):
@@ -227,13 +248,15 @@ class UpdateController(QObject):
                 self.window.error(exc)
                 return
             self.window.result_label.setText("正在下载更新，请稍候…")
+            self.download_status = "download"
             self.window.update_button.setText("下载中…")
             self.window.update_progress.setValue(0)
             self.window.update_progress.setFormat("0.0%")
             self.window.update_progress.show()
             def download():
                 from .update_process import download_update
-                return download_update(release, self.target, self.cancel, progress=self.download_progress.emit)
+                return download_update(release, self.target, self.cancel, progress=self.download_progress.emit,
+                                       phase=self.download_phase.emit)
             self._start("download", download)
         elif self.stage == "download":
             # Cancellation is allowed up to this handoff, never during EXE replacement.

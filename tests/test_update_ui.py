@@ -90,7 +90,8 @@ class UpdateUITests(unittest.TestCase):
             self.window.update_button.click()
             self.wait_until(lambda: self.ready.called)
             download.assert_called_once_with(self.release, target, self.updater.cancel,
-                                             progress=self.updater.download_progress.emit)
+                                             progress=self.updater.download_progress.emit,
+                                             phase=self.updater.download_phase.emit)
             install.assert_called_once_with(staged, target)
         self.ready.assert_called_once()
 
@@ -225,7 +226,7 @@ class UpdateUITests(unittest.TestCase):
         staged.write_bytes(b"MZnew")
         entered = threading.Event()
 
-        def download(release, target, cancel, *, progress):
+        def download(release, target, cancel, *, progress, phase):
             progress(2, 5)
             entered.set()
             cancel.wait(3)
@@ -270,6 +271,21 @@ class UpdateUITests(unittest.TestCase):
             prompt.assert_not_called()
             self.window.error.assert_not_called()
             self.assertTrue(self.window.update_channel.isEnabled())
+
+    def test_verify_and_retry_phases_are_visible_and_stale_updates_are_ignored(self):
+        self.updater.stage = "download"
+        self.updater._phase("verify")
+        self.updater._progress(5, 5)
+        self.assertIn("校验", self.window.update_progress.format())
+        self.assertEqual(self.window.update_button.text(), "校验中…")
+        self.updater._phase("retry")
+        self.assertIn("重试", self.window.update_progress.format())
+        self.updater._phase("download")
+        self.updater._progress(1, 5)
+        self.assertIn("20.0%", self.window.update_progress.format())
+        self.updater.cancel.set()
+        self.updater._phase("verify")
+        self.assertEqual(self.window.update_button.text(), "下载中…")
 
     def test_channel_save_failure_restores_previous_choice(self):
         before = self.updater.preferences_path.read_bytes()

@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import time
+from http.client import IncompleteRead
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -20,6 +21,7 @@ from .update_settings import CACHE_SECONDS, MANIFEST_URL, REPOSITORY, UPDATE_CHA
 from .update_manifest import validate_manifest
 from .config_manager import atomic_json
 from .update_protocol import Release, installed_executable, version_tuple
+from .update_files import preflight_download, mark_task
 
 
 EXE_NAME = "ValorantToxicTamer.exe"
@@ -101,41 +103,69 @@ def latest_release(current=VERSION, *, channel="stable", cache_path=None):
     return release
 
 
-def download_release(release, target, cancel, *, progress=lambda received, total: None, staged_path=None):
+def download_release(release, target, cancel, *, progress=lambda received, total: None, staged_path=None,
+                     phase=lambda stage: None):
     """Stage beside the installed EXE so replacement stays on the same volume."""
     staged = None
     try:
         if cancel.is_set():
             raise ValueError("更新已取消。")
+        if staged_path is None:
+            preflight_download(target, release.size)
         stream = (Path(staged_path).open("wb") if staged_path is not None else
                   tempfile.NamedTemporaryFile(dir=target.parent, prefix=".vtt-update-",
                                               suffix=".exe", delete=False))
         with stream:
             staged = Path(stream.name)
             request = Request(release.url, headers={"User-Agent": f"ValorantToxicTamer/{VERSION}"})
-            digest = hashlib.sha256()
-            received = 0
-            progress(0, release.size)
             deadline = time.monotonic() + 600
-            with _open_update_url(request) as response:
-                while True:
-                    if cancel.is_set():
+            for attempt in range(3):
+                if cancel.is_set():
+                    raise ValueError("更新已取消。")
+                stream.seek(0)
+                stream.truncate()
+                digest = hashlib.sha256()
+                received = 0
+                phase("download")
+                progress(0, release.size)
+                try:
+                    with _open_update_url(request) as response:
+                        while True:
+                            if cancel.is_set():
+                                raise ValueError("更新已取消。")
+                            if time.monotonic() > deadline:
+                                raise ValueError("更新下载超时，请重试。")
+                            chunk = response.read(256 * 1024)
+                            if not chunk:
+                                break
+                            received += len(chunk)
+                            if received > release.size:
+                                raise ValueError("更新文件大小不符，请重试。")
+                            stream.write(chunk)
+                            digest.update(chunk)
+                            progress(received, release.size)
+                    if received != release.size:
+                        raise IncompleteRead(b"", release.size - received)
+                    break
+                except (HTTPError, URLError, TimeoutError, ConnectionError, IncompleteRead) as exc:
+                    if isinstance(exc, HTTPError) and exc.code not in (408, 429, 500, 502, 503, 504):
+                        raise
+                    if attempt == 2:
+                        if isinstance(exc, IncompleteRead):
+                            raise ValueError("更新文件下载不完整，请重试。") from exc
+                        raise
+                    phase("retry")
+                    if cancel.wait(0.5 * (attempt + 1)):
                         raise ValueError("更新已取消。")
                     if time.monotonic() > deadline:
                         raise ValueError("更新下载超时，请重试。")
-                    chunk = response.read(256 * 1024)
-                    if not chunk:
-                        break
-                    received += len(chunk)
-                    if received > release.size:
-                        raise ValueError("更新文件大小不符，请重试。")
-                    stream.write(chunk)
-                    digest.update(chunk)
-                    progress(received, release.size)
+            phase("verify")
             stream.flush()
             os.fsync(stream.fileno())
         if received != release.size:
             raise ValueError("更新文件下载不完整，请重试。")
+        if cancel.is_set():
+            raise ValueError("更新已取消。")
         if release.digest and digest.hexdigest() != release.digest.split(":", 1)[1].lower():
             raise ValueError("更新文件 SHA-256 校验失败，请重试。")
         with staged.open("rb") as stream:
@@ -184,6 +214,7 @@ def launch_installer(staged, target):
             ], creationflags=subprocess.CREATE_NO_WINDOW,
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                 cwd=directory, env=environment)
+            mark_task(directory, staged=staged, helper_pid=process.pid)
         finally:
             if set_dll_directory:
                 set_dll_directory(str(bundle))

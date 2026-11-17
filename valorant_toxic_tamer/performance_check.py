@@ -38,7 +38,7 @@ def process_memory():
 
 
 def run(report_path, started):
-    from PySide6.QtCore import qVersion
+    from PySide6.QtCore import qVersion, Qt
     from PySide6.QtWidgets import QApplication
     from PySide6.QtGui import QFontDatabase, QFontInfo
     from . import app as application
@@ -119,6 +119,27 @@ def run(report_path, started):
             window.reload_messages()
             app.processEvents()
             sample("apply_import_1000", began)
+            # The same public operations can probe both the reference commit
+            # and the candidate with an identical harness and temporary data.
+            for count in (5000, 20000):
+                controller.messages.replace([f"性能消息 {i:05d}，保持配合。" for i in range(count)])
+                controller.messages.select_categories(["all"])
+                window.reload_messages()
+                app.processEvents()
+                began = time.perf_counter()
+                window.send_categories.item(0).setCheckState(Qt.CheckState.Unchecked)
+                app.processEvents()
+                sample(f"select_{count}", began)
+                began = time.perf_counter()
+                controller.messages.edit_message(count // 2, "已修改的性能消息，保持配合。")
+                window.reload_messages(count // 2)
+                app.processEvents()
+                sample(f"edit_{count}", began)
+                began = time.perf_counter()
+                controller.messages.edit_message(0, "长消息：" + "注意配合，等待队友。" * 80)
+                window.reload_messages(0)
+                app.processEvents()
+                sample(f"long_edit_{count}", began)
             window.information = lambda *args: None
             errors = []
             window.error = errors.append

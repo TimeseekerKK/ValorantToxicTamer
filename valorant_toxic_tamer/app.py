@@ -47,6 +47,8 @@ class Application(QObject):
             self.reveal(0 if registered else 1)
         self.tray.showMessage("ValorantToxicTamer", "已启动。双击托盘图标管理消息。" if registered
                               else "快捷键注册失败，请在设置中选择其他按键。")
+        if getattr(self.log_handler, "startup_error", None):
+            self.report("诊断日志不可用，程序仍可正常使用：" + self.log_handler.startup_error)
 
     @Slot(str)
     def report(self, message):
@@ -135,8 +137,7 @@ class Application(QObject):
         self.quitting = True
         self.sender.cancel.set()
         if self.window is not None:
-            self.window.closing = True
-            self.window.updater.begin_shutdown()
+            self.window.begin_shutdown()
             self.window.result_label.setText("正在退出，等待后台任务清理…")
             self.window.setEnabled(False)
         self.quit_timer.start()
