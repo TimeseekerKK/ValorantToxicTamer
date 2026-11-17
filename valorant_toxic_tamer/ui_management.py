@@ -6,8 +6,8 @@ services and window-level notifications are accessed explicitly through host.
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Slot, QItemSelectionModel
-from PySide6.QtWidgets import (QDialog, QFileDialog, QFormLayout, QHBoxLayout,
-    QListWidget, QListWidgetItem, QMessageBox, QScrollArea, QSizePolicy,
+from PySide6.QtWidgets import (QDialog, QFileDialog, QHBoxLayout,
+    QListWidget, QListWidgetItem, QMenu, QMessageBox, QScrollArea, QSizePolicy,
     QStackedWidget, QStyle, QVBoxLayout, QWidget)
 
 from .message_manager import ALL_CATEGORY, UNCATEGORIZED, CATEGORY_MODES, deduplicate_messages
@@ -30,15 +30,15 @@ class ManagementPage(QWidget):
         self._items_by_key = {}
         self._suspended_state = None
         columns = QHBoxLayout(self)
-        columns.setContentsMargins(0, 16, 0, 0)
-        columns.setSpacing(16)
+        columns.setContentsMargins(0, 8, 0, 0)
+        columns.setSpacing(12)
         preview = Panel()
         preview.setMinimumWidth(220)
         preview.setMaximumWidth(330)
         card = QVBoxLayout(preview)
-        card.setContentsMargins(18, 16, 18, 16)
-        card.setSpacing(10)
-        card.addWidget(label("下一条", "section"))
+        card.setContentsMargins(14, 12, 14, 12)
+        card.setSpacing(8)
+        card.addWidget(label("下一条发送", "section"))
         self.progress_label = WrappingLabel()
         self.progress_label.setObjectName("progress")
         card.addWidget(self.progress_label)
@@ -50,24 +50,29 @@ class ManagementPage(QWidget):
         card.addStretch()
         self.state_label = label("等待添加消息", "ready", True)
         card.addWidget(self.state_label)
-        keys = QFormLayout()
+        keys = QHBoxLayout()
         self.team_hint = label("F8", "keycap")
         self.all_hint = label("F9", "keycap")
-        keys.addRow("队伍", self.team_hint)
-        keys.addRow("全体", self.all_hint)
+        keys.addWidget(label("队伍"))
+        keys.addWidget(self.team_hint)
+        keys.addWidget(label("全体"))
+        keys.addWidget(self.all_hint)
         card.addLayout(keys)
         self.keys_label = label("快捷键注册中…", "muted", True)
         card.addWidget(self.keys_label)
+        self.pause_button = self.button("暂停发送", self.toggle_pause)
+        self.pause_button.setToolTip("暂停两个频道的快捷发送，保留发送范围与进度；本次运行有效。")
+        card.addWidget(self.pause_button)
         category_panel = Panel()
         category_layout = QVBoxLayout(category_panel)
         category_layout.setContentsMargins(14, 12, 14, 12)
         category_layout.setSpacing(6)
-        category_layout.addWidget(label("参与发送的类别", "section"))
+        category_layout.addWidget(label("发送范围", "section"))
         self.send_categories = QListWidget()
         self.send_categories.setItemDelegate(CategoryOrderDelegate(self.send_categories))
-        self.send_categories.setAccessibleName("参与发送的类别")
+        self.send_categories.setAccessibleName("发送范围：勾选参与发送的类别")
         self.send_categories.setToolTip("勾选框内数字表示发送顺序，取消后自动补位；全部消息与其他类别互斥。取消所有勾选可暂停发送。")
-        self.send_categories.setFixedHeight(100)
+        self.send_categories.setFixedHeight(64)
         self.send_categories.setStyleSheet("""
             QListWidget::item { min-height: 26px; padding: 1px 3px; }
             QListWidget::indicator { width: 26px; height: 24px; border: 1px solid #8595a5; }
@@ -76,18 +81,25 @@ class ManagementPage(QWidget):
         """)
         self.send_categories.itemChanged.connect(self.send_category_changed)
         category_layout.addWidget(self.send_categories)
+        category_layout.addWidget(label("勾选决定发送范围", "muted"))
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(label("发送方式"))
+        self.send_mode = label(CATEGORY_MODES[self.host.messages.mode], "muted")
+        self.send_mode.setToolTip("在设置页修改多类别发送方式，保存后生效。")
+        mode_row.addWidget(self.send_mode, 1)
+        category_layout.addLayout(mode_row)
         self.send_order_label = label("", "muted", True)
-        self.send_order_label.setMaximumHeight(48)
+        self.send_order_label.setMaximumHeight(36)
         category_layout.addWidget(self.send_order_label)
         self.preview_scroll = QScrollArea()
         self.preview_scroll.setWidgetResizable(True)
         self.preview_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.preview_scroll.setMinimumWidth(240)
-        self.preview_scroll.setMaximumWidth(350)
+        self.preview_scroll.setMaximumWidth(300)
         self.preview_scroll.setWidget(preview)
         sidebar = QWidget()
         sidebar.setMinimumWidth(240)
-        sidebar.setMaximumWidth(350)
+        sidebar.setMaximumWidth(300)
         sidebar_layout = QVBoxLayout(sidebar)
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
         sidebar_layout.setSpacing(10)
@@ -97,7 +109,7 @@ class ManagementPage(QWidget):
 
         workspace = Panel()
         manage_layout = QVBoxLayout(workspace)
-        manage_layout.setContentsMargins(16, 14, 16, 12)
+        manage_layout.setContentsMargins(12, 10, 12, 10)
         manage_layout.setSpacing(6)
         toolbar = QHBoxLayout()
         toolbar.addWidget(label("消息列表", "section"))
@@ -105,7 +117,7 @@ class ManagementPage(QWidget):
         toolbar.addWidget(self.count_label)
         toolbar.addStretch()
         self.add_button = self.button("添加消息", self.add_message, primary=True)
-        self.import_button = self.button("导入消息", self.import_txt)
+        self.import_button = self.button("导入", self.import_txt)
         toolbar.addWidget(self.add_button)
         toolbar.addWidget(self.import_button)
         self.cancel_import_button = self.button("取消导入", self.cancel_import)
@@ -113,26 +125,30 @@ class ManagementPage(QWidget):
         toolbar.addWidget(self.cancel_import_button)
         manage_layout.addLayout(toolbar)
         category_bar = QHBoxLayout()
-        category_bar.addWidget(label("筛选消息"))
+        category_bar.setSpacing(8)
+        category_bar.addWidget(label("列表筛选"))
         self.view_category = CutComboBox(wheel_changes=False)
         self.view_category.setAccessibleName("按类别筛选消息，不改变发送范围")
         self.view_category.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
-        self.view_category.setMinimumWidth(100)
+        self.view_category.setMinimumWidth(120)
+        self.view_category.setMaximumWidth(190)
         self.view_category.currentIndexChanged.connect(self.filter_messages)
         category_bar.addWidget(self.view_category, 1)
-        self.manage_categories_button = self.button("管理类别…", self.manage_categories)
-        category_bar.addWidget(self.manage_categories_button)
-        manage_layout.addLayout(category_bar)
+        self.manage_categories_button = self.button("管理类别", self.manage_categories)
         self.search = CutLineEdit()
         self.search.setAccessibleName("搜索消息")
-        self.search.setPlaceholderText("搜索消息内容（不改变发送顺序）")
+        self.search.setPlaceholderText("搜索消息…")
+        self.search.setToolTip("仅筛选列表，不改变发送范围或顺序。")
+        self.search.setMinimumWidth(90)
         self.search.setClearButtonEnabled(True)
         self.search_timer = QTimer(self)
         self.search_timer.setSingleShot(True)
         self.search_timer.setInterval(150)
         self.search_timer.timeout.connect(self.filter_messages)
         self.search.textChanged.connect(lambda: self.search_timer.start())
-        manage_layout.addWidget(self.search)
+        category_bar.addWidget(self.search, 2)
+        category_bar.addWidget(self.manage_categories_button)
+        manage_layout.addLayout(category_bar)
         manage_layout.addWidget(separator())
         self.message_stack = QStackedWidget()
         self.list_widget = MessageList()
@@ -160,41 +176,58 @@ class ManagementPage(QWidget):
         manage_layout.addWidget(self.message_stack, 1)
         manage_layout.addWidget(separator())
         buttons = QHBoxLayout()
-        self.edit_button = self.button("编辑消息", self.edit_message)
-        self.delete_button = self.button("删除选中消息", self.delete_message)
-        self.clear_button = self.button("清空消息…", self.clear_messages)
+        self.selection_label = label("已选 0 条", "muted")
+        buttons.addWidget(self.selection_label)
+        self.edit_button = self.button("编辑", self.edit_message)
+        self.delete_button = self.button("删除", self.delete_message)
         self.up_button = self.button("", lambda: self.move(-1), icon=QStyle.StandardPixmap.SP_ArrowUp)
         self.down_button = self.button("", lambda: self.move(1), icon=QStyle.StandardPixmap.SP_ArrowDown)
         for button, name in ((self.up_button, "上移"), (self.down_button, "下移")):
             button.setFixedWidth(42)
             button.setAccessibleName(name)
             button.setToolTip(name)
-        self.export_button = self.button("导出 TXT", self.export_txt)
+        self.more_button = self.button("更多 ⋯", lambda: None)
+        self.more_menu = QMenu(self.more_button)
+        self.export_action = self.more_menu.addAction("导出 TXT")
+        self.export_action.triggered.connect(self.export_txt)
+        self.more_menu.addSeparator()
+        self.clear_action = self.more_menu.addAction("清空全部消息…")
+        self.clear_action.triggered.connect(self.clear_messages)
+        self.more_button.setMenu(self.more_menu)
         self.edit_buttons = [self.add_button, self.import_button, self.edit_button,
-                             self.delete_button, self.clear_button, self.up_button, self.down_button, self.export_button]
-        for button in (self.edit_button, self.delete_button, self.clear_button, self.up_button, self.down_button):
+                             self.delete_button, self.up_button, self.down_button, self.more_button]
+        for button in (self.edit_button, self.delete_button, self.up_button, self.down_button):
             buttons.addWidget(button)
         buttons.addStretch()
-        buttons.addWidget(self.export_button)
+        buttons.addWidget(self.more_button)
         manage_layout.addLayout(buttons)
         self.batch_category_bar = QWidget()
         batch = QHBoxLayout(self.batch_category_bar)
         batch.setContentsMargins(0, 0, 0, 0)
-        self.selected_count_label = label("所属类别")
+        self.selected_count_label = label("移动选中消息到…")
         batch.addWidget(self.selected_count_label)
         self.move_category = CutComboBox(wheel_changes=False)
         self.move_category.setAccessibleName("选中消息的新所属类别")
         self.move_category.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.move_category.setMinimumWidth(100)
         batch.addWidget(self.move_category, 1)
-        self.assign_category_button = self.button("修改所属类别", self.assign_category)
+        self.assign_category_button = self.button("移动", self.assign_category)
         batch.addWidget(self.assign_category_button)
         manage_layout.addWidget(self.batch_category_bar)
-        manage_layout.addWidget(label("已自动保存 · 筛选只影响消息列表；左侧勾选决定发送范围。", "muted", True))
+        manage_layout.addWidget(label("已自动保存", "muted"))
         columns.addWidget(workspace, 7)
 
     def button(self, text, action, *, primary=False, icon=None):
         return action_button(self, text, action, primary=primary, icon=icon)
+
+    def toggle_pause(self):
+        try:
+            self.host.sender.set_paused(not self.host.sender.paused)
+        except ValueError as exc:
+            self.host.error(exc)
+            return
+        self.host.report("快捷发送已暂停，发送范围与进度保持不变。" if self.host.sender.paused
+                         else "快捷发送已继续 · 游戏前台使用快捷键")
 
     def begin_shutdown(self):
         self.search_timer.stop()
@@ -250,13 +283,19 @@ class ManagementPage(QWidget):
                 item.setCheckState(Qt.CheckState.Checked if cid in selected else Qt.CheckState.Unchecked)
         finally:
             self.send_categories.blockSignals(blocked)
+        self.resize_category_list()
         self.update_send_order()
         self._category_signature = signature
+
+    def resize_category_list(self):
+        row_height = max(32, self.send_categories.sizeHintForRow(0))
+        self.send_categories.setFixedHeight(min(4, self.send_categories.count()) * row_height + 8)
 
     def update_send_order(self):
         names = [self.host.messages.category_name(cid) for cid in self.host.messages.selected_categories]
         order = " → ".join(names) if names else "未勾选类别，快捷发送已暂停"
-        self.send_order_label.setText(f"{CATEGORY_MODES[self.host.messages.mode]}\n{order}")
+        self.send_mode.setText(CATEGORY_MODES[self.host.messages.mode])
+        self.send_order_label.setText(order)
         self.send_order_label.setToolTip(order)
 
     def send_category_changed(self, item):
@@ -307,7 +346,7 @@ class ManagementPage(QWidget):
     def update_actions(self, *_):
         row = self.list_widget.currentRow()
         with self.host.sender.lock:
-            idle = not self.host.sender.busy and self.import_worker is None
+            idle = not self.host.sender.busy and self.import_worker is None and not self.host.closing
         rows = self.selected_rows()
         selected = row >= 0 and row in rows and len(rows) == 1
         cid = self.view_category.currentData() or ALL_CATEGORY
@@ -316,29 +355,34 @@ class ManagementPage(QWidget):
         self.import_button.setEnabled(idle)
         self.edit_button.setEnabled(idle and selected)
         self.delete_button.setEnabled(idle and bool(rows))
-        self.clear_button.setEnabled(idle and bool(category_count))
+        self.clear_action.setEnabled(idle and bool(category_count))
         # Reordering a filtered subset would obscure the actual adjacent message.
         filtered = bool(self.search.text().strip())
         offset = self.host.messages.category_offset(cid, row)
         self.up_button.setEnabled(idle and selected and offset > 0 and not filtered)
         self.down_button.setEnabled(idle and selected and 0 <= offset < category_count - 1 and not filtered)
-        self.export_button.setEnabled(idle and bool(category_count))
+        self.export_action.setEnabled(idle and bool(category_count))
+        self.more_button.setEnabled(idle and bool(category_count))
+        self.pause_button.setEnabled(idle)
         importing = self.import_worker is not None and self.import_worker.isRunning()
         self.cancel_import_button.setVisible(importing)
         self.cancel_import_button.setEnabled(importing and not self.import_worker.cancel.is_set())
         self.assign_category_button.setEnabled(idle and bool(rows))
         self.batch_category_bar.setVisible(bool(rows))
-        self.selected_count_label.setText(f"已选 {len(rows)} 条 · 所属类别")
+        self.selection_label.setText(f"已选 {len(rows)} 条")
         self.move_category.setEnabled(idle)
         self.view_category.setEnabled(idle)
         self.send_categories.setEnabled(idle)
         self.manage_categories_button.setEnabled(idle)
-        self.clear_button.setToolTip("清空整个消息库" if cid == ALL_CATEGORY
-                                     else f"清空“{self.host.messages.category_name(cid)}”中的消息")
+        self.clear_action.setText("清空全部消息…" if cid == ALL_CATEGORY
+                                 else f"清空“{self.host.messages.category_name(cid)}”…")
+        self.clear_action.setToolTip("不受搜索关键词影响，确认后删除当前类别的全部消息。")
+        self.export_action.setText("导出全部消息 TXT" if cid == ALL_CATEGORY else "导出当前类别 TXT")
         if self.category_dialog is not None:
             self.category_dialog.update_actions()
         if self.host.settings_loaded:
             self.host.settings.save_button.setEnabled(idle)
+            self.host.settings.discard_button.setEnabled(idle and self.host.settings.has_changes)
 
     def _set_message_item(self, item, row):
         text = self.host.messages.text_at(row)

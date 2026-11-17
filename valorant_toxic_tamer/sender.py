@@ -15,11 +15,15 @@ class Sender:
         self.wait = wait or self.cancel.wait
         self.lock = threading.RLock()
         self.busy = False
+        self.paused = False
         self.ready_at = 0.0
         self.thread = None
 
     def trigger(self, channel):
         with self.lock:
+            if self.paused:
+                self.notify("已忽略：快捷发送已暂停，请在消息管理中继续发送。")
+                return False
             if self.cancel.is_set() or self.busy or self.clock() < self.ready_at:
                 logger.info("trigger ignored channel=%s busy=%s cooldown=%s stopping=%s", channel,
                             self.busy, self.clock() < self.ready_at, self.cancel.is_set())
@@ -48,6 +52,12 @@ class Sender:
                 self.thread = None
                 raise
             return True
+
+    def set_paused(self, paused):
+        with self.lock:
+            if self.busy:
+                raise ValueError("正在输入，请等待本条输入结束后暂停。")
+            self.paused = bool(paused)
 
     def edit(self, action):
         with self.lock:

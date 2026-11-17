@@ -88,7 +88,7 @@ class MessageDelegate(QStyledItemDelegate):
             return cached
         rect = self.page.list_widget.fontMetrics().boundingRect(
             QRect(0, 0, width, 100000), Qt.TextFlag.TextWordWrap, text)
-        size = QSize(width + reserved, max(62, rect.height() + 30))
+        size = QSize(width + reserved, max(42, rect.height() + 18))
         self._sizes[key] = size
         if len(self._sizes) > 25000:
             self._sizes.popitem(last=False)
@@ -103,8 +103,6 @@ class MessageDelegate(QStyledItemDelegate):
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         if selected:
             painter.fillRect(rect, QColor("#2b3e50"))
-        elif upcoming:
-            painter.fillRect(rect, QColor("#38232e"))
         elif option.state & QStyle.StateFlag.State_MouseOver:
             painter.fillRect(rect, QColor("#1e2d3b"))
         if upcoming:
@@ -116,8 +114,8 @@ class MessageDelegate(QStyledItemDelegate):
         painter.drawText(QRect(rect.left() + 16, rect.top(), number_width, rect.height()),
                          Qt.AlignmentFlag.AlignVCenter, f"{index.row() + 1:02d}")
         painter.setPen(QColor(TEXT))
-        painter.drawText(QRect(rect.left() + number_width + 24, rect.top() + 14,
-                               rect.width() - number_width - upcoming_width - 40, rect.height() - 28),
+        painter.drawText(QRect(rect.left() + number_width + 24, rect.top() + 9,
+                               rect.width() - number_width - upcoming_width - 40, rect.height() - 18),
                          Qt.TextFlag.TextWordWrap | Qt.AlignmentFlag.AlignVCenter,
                          index.data(Qt.ItemDataRole.UserRole) or "")
         if upcoming:
@@ -125,7 +123,9 @@ class MessageDelegate(QStyledItemDelegate):
             font.setPixelSize(max(8, font.pixelSize() - 1))
             painter.setFont(font)
             painter.setPen(QColor("#ff8290"))
-            painter.drawText(QRect(rect.right() - upcoming_width - 6, rect.top(), upcoming_width, rect.height()),
+            badge = QRect(rect.right() - upcoming_width - 8, rect.center().y() - 12, upcoming_width, 24)
+            painter.drawRect(badge)
+            painter.drawText(badge,
                              Qt.AlignmentFlag.AlignCenter, "下一条")
         if option.state & QStyle.StateFlag.State_HasFocus:
             painter.setPen(QPen(QColor("#6c8296"), 1, Qt.PenStyle.DashLine))

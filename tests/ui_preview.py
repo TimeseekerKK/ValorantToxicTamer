@@ -27,15 +27,22 @@ class PreviewWindow(MainWindow):
 
 def main():
     root = Path(__file__).resolve().parents[1]
-    output = root / "artifacts" / "screenshots" / "ui-redesign"
+    output = root / "artifacts" / "screenshots" / "ui-six-improvements"
     output.mkdir(parents=True, exist_ok=True)
     app = QApplication([])
     app.styleHints().setColorScheme(Qt.ColorScheme.Dark)
     with tempfile.TemporaryDirectory(prefix="preview-", dir=output) as directory:
         directory = Path(directory)
         messages = MessageManager(directory / "messages.json")
-        messages.replace(["谢谢队友，打得漂亮。", "我们一起配合，下一局加油！",
-                          "注意侧面，等大家一起进点。", "先稳住，我们还有机会。", "辛苦了，下一把见。"])
+        teamwork = messages.create_category("沟通配合")
+        friendly = messages.create_category("友好互动")
+        messages.append(["谢谢队友，打得漂亮。", "我们一起配合，下一局加油！",
+                         "注意侧面，等大家一起进点。", "先稳住，我们还有机会。",
+                         "一起守住这个点。"], teamwork)
+        messages.append(["辛苦了，下一把见。", "这波配合很好！", "大家加油，稳住节奏。",
+                         "很高兴和大家一起打。"], friendly)
+        messages.append(["等我一下，马上到。", "我来补位。", "下一局继续加油！"])
+        messages.select_categories([teamwork, friendly])
         messages.advance()
         config = ConfigManager(directory / "config.json")
         sender = Sender(messages, Mock())

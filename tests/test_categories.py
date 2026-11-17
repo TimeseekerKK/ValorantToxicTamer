@@ -682,7 +682,7 @@ class CategoryUITests(unittest.TestCase):
         self.window.management.list_widget.item(0).setSelected(True)
         self.window.management.update_actions()
         self.assertFalse(self.window.management.batch_category_bar.isHidden())
-        self.assertEqual(self.window.management.assign_category_button.text(), "修改所属类别")
+        self.assertEqual(self.window.management.assign_category_button.text(), "移动")
 
     def test_category_row_actions_are_not_clipped_at_largest_font(self):
         self.config.save({**self.config.value, "font_size": 16})

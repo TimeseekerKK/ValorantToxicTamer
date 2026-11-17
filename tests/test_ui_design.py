@@ -57,6 +57,78 @@ class DesignUITests(unittest.TestCase):
         self.assertEqual(self.window.management.next_index, 1)
         self.assertEqual(self.window.management.next_label.text(), "第二条")
 
+    def test_pause_retains_range_progress_and_blocks_both_hotkeys(self):
+        self.messages.advance()
+        before = self.messages.path.read_bytes()
+        selected = self.messages.selected_categories
+        self.sender.api.reset_mock()
+        self.window.management.pause_button.click()
+        self.assertTrue(self.sender.paused)
+        for channel in ("team", "all"):
+            self.assertFalse(self.sender.trigger(channel))
+        self.sender.api.target.assert_not_called()
+        self.assertEqual(self.messages.index, 1)
+        self.assertEqual(self.messages.selected_categories, selected)
+        self.assertEqual(self.messages.path.read_bytes(), before)
+        self.assertIn("已暂停", self.window.management.state_label.text())
+        self.window.management.pause_button.click()
+        self.assertFalse(self.sender.paused)
+        self.assertIn("就绪", self.window.management.state_label.text())
+        self.assertEqual(self.messages.index, 1)
+
+    def test_default_window_displays_nine_rows_and_settings_without_scrolling(self):
+        self.messages.replace([f"第 {i} 条短消息" for i in range(12)])
+        self.window.reload_messages(3)
+        self.window.set_hotkey_status({"team": "F8 · 已注册", "all": "F9 · 已注册"})
+        self.app.processEvents()
+        listing = self.window.management.list_widget
+        listing.scrollToTop()
+        self.assertLessEqual(listing.visualItemRect(listing.item(8)).bottom(), listing.viewport().height())
+        self.assertEqual(self.window.management.preview_scroll.verticalScrollBar().maximum(), 0)
+        self.window.tabs.setCurrentIndex(1)
+        self.app.processEvents()
+        scroll = self.window.settings.findChild(QScrollArea)
+        self.assertEqual(scroll.verticalScrollBar().maximum(), 0)
+        self.assertTrue(self.window.settings.autostart.isVisible())
+
+    def test_more_actions_follow_category_and_cannot_clear_while_busy(self):
+        page = self.window.management
+        cid = self.messages.create_category("配合")
+        self.messages.append(["一起走"], cid)
+        self.window.reload_messages()
+        page.view_category.setCurrentIndex(page.view_category.findData(cid))
+        self.assertEqual(page.clear_action.text(), "清空“配合”…")
+        self.sender.busy = True
+        self.window.refresh_status()
+        self.assertFalse(page.clear_action.isEnabled())
+        self.assertFalse(page.export_action.isEnabled())
+        self.assertFalse(page.pause_button.isEnabled())
+        self.sender.busy = False
+
+    def test_discard_draft_does_not_undo_autosaved_update_channel(self):
+        settings = self.window.settings
+        settings.cooldown.setText("0.8")
+        settings.update_channel.setCurrentIndex(settings.update_channel.findData("beta"))
+        settings.discard_button.click()
+        self.assertEqual(settings.cooldown.text(), "0.5")
+        self.assertEqual(settings.update_channel.currentData(), "beta")
+        self.assertFalse(settings.has_changes)
+        self.assertFalse(settings.discard_button.isEnabled())
+
+    def test_invalid_settings_keep_other_drafts_for_correction(self):
+        settings = self.window.settings
+        settings.font_size.setCurrentIndex(settings.font_size.findData(16))
+        settings.cooldown.setText("invalid")
+        before = self.config.path.read_bytes()
+        settings.apply_settings()
+        self.assertEqual(settings.cooldown.text(), "invalid")
+        self.assertEqual(settings.font_size.currentData(), 16)
+        self.assertEqual(self.config.path.read_bytes(), before)
+        settings.cooldown.setText("0.8")
+        settings.apply_settings()
+        self.assertEqual(self.config.value["cooldown"], 0.8)
+        self.assertEqual(self.config.value["font_size"], 16)
+
     def test_download_cancel_and_progress_fit_default_view_at_larger_fonts(self):
         self.window.tabs.setCurrentIndex(1)
         scroll = self.window.tabs.widget(1).findChild(QScrollArea)
@@ -96,13 +168,13 @@ class DesignUITests(unittest.TestCase):
         self.assertTrue(self.window.management.add_button.isEnabled())
         self.assertTrue(self.window.management.import_button.isEnabled())
         self.assertFalse(self.window.management.edit_button.isEnabled())
-        self.assertFalse(self.window.management.clear_button.isEnabled())
-        self.assertFalse(self.window.management.export_button.isEnabled())
+        self.assertFalse(self.window.management.clear_action.isEnabled())
+        self.assertFalse(self.window.management.export_action.isEnabled())
 
     def test_clear_list_confirms_count_and_persists_empty_state(self):
         self.messages.advance()
         self.window.management.list_widget.setCurrentRow(-1)
-        self.assertTrue(self.window.management.clear_button.isEnabled())
+        self.assertTrue(self.window.management.clear_action.isEnabled())
         observed = {}
 
         def confirm():
@@ -112,7 +184,7 @@ class DesignUITests(unittest.TestCase):
             dialog.button(QMessageBox.StandardButton.Yes).click()
 
         QTimer.singleShot(0, confirm)
-        QTest.mouseClick(self.window.management.clear_button, Qt.MouseButton.LeftButton)
+        self.window.management.clear_action.trigger()
         self.assertIn("全部 3 条消息", observed["text"])
         self.assertEqual(observed["default"], QMessageBox.StandardButton.No)
         self.assertEqual(self.messages.messages, [])
@@ -122,10 +194,11 @@ class DesignUITests(unittest.TestCase):
         self.assertEqual(self.window.management.message_stack.currentIndex(), 1)
         self.assertEqual(self.window.management.count_label.text(), "0 条")
         self.assertEqual(self.window.management.next_label.text(), "暂无消息")
-        self.assertIn("0 / 0", self.window.management.state_label.text())
-        self.assertFalse(self.window.management.clear_button.isEnabled())
+        self.assertIn("范围为空", self.window.management.state_label.text())
+        self.assertIn("00", self.window.management.progress_label.text())
+        self.assertFalse(self.window.management.clear_action.isEnabled())
         self.assertFalse(self.window.management.delete_button.isEnabled())
-        self.assertFalse(self.window.management.export_button.isEnabled())
+        self.assertFalse(self.window.management.export_action.isEnabled())
 
     def test_clear_list_cancel_enter_escape_and_close_preserve_messages(self):
         self.messages.advance()
@@ -282,8 +355,10 @@ class DesignUITests(unittest.TestCase):
     def test_wheel_over_font_size_scrolls_settings_without_changing_selection(self):
         self.window.resize(840, 638)
         self.window.tabs.setCurrentIndex(1)
-        box = self.window.settings.font_size
+        # The compact page fits at the default font; force overflow to verify propagation.
         scroll = self.window.tabs.currentWidget().findChild(QScrollArea)
+        scroll.widget().setMinimumHeight(850)
+        box = self.window.settings.font_size
         before = self.config.path.read_bytes()
         self.app.processEvents()
         for focused in (False, True):
@@ -331,6 +406,10 @@ class DesignUITests(unittest.TestCase):
             self.window.settings.apply_settings()
         self.window.error.assert_called_once()
         self.assertEqual(self.config.path.read_bytes(), before)
+        self.assertEqual(self.window.settings.font_size.currentData(), 16)
+        self.assertIn("未保存", self.window.settings.error_label.text())
+        self.assertTrue(self.window.settings.discard_button.isEnabled())
+        self.window.settings.discard_button.click()
         self.assertEqual(self.window.settings.font_size.currentData(), 13)
         self.assertEqual(self.window.management.list_widget.font().pixelSize(), 13)
 

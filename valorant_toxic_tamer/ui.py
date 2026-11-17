@@ -30,32 +30,37 @@ class MainWindow(QMainWindow):
         root = QWidget()
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
-        layout.setContentsMargins(22, 18, 22, 14)
-        layout.setSpacing(14)
+        layout.setContentsMargins(18, 8, 18, 10)
+        layout.setSpacing(8)
         header = QHBoxLayout()
         icon = QLabel()
-        icon.setPixmap(self.windowIcon().pixmap(38, 38))
+        icon.setPixmap(self.windowIcon().pixmap(30, 30))
         header.addWidget(icon)
         header.addSpacing(8)
         header.addWidget(label("ValorantToxicTamer", "brand"))
         header.addWidget(label(f"V{VERSION}", "muted"))
         header.addStretch()
+        self.navigation = CutTabBar()
+        self.navigation.addTab("消息管理")
+        self.navigation.addTab("设置")
+        header.addWidget(self.navigation)
         layout.addLayout(header)
         layout.addWidget(separator())
         self.tabs = QTabWidget()
-        self.tabs.setTabBar(CutTabBar())
         self.tabs.setDocumentMode(True)
+        self.tabs.tabBar().hide()
         layout.addWidget(self.tabs, 1)
         self.management = ManagementPage(self)
         self.tabs.addTab(self.management, "消息管理")
         self.settings_placeholder = QWidget()
         self.tabs.addTab(self.settings_placeholder, "设置")
         self.tabs.currentChanged.connect(self._page_changed)
+        self.tabs.currentChanged.connect(self.navigation.setCurrentIndex)
+        self.navigation.currentChanged.connect(self.tabs.setCurrentIndex)
         layout.addWidget(separator())
-        self.result_label = label("就绪 · 请添加消息，然后在游戏前台使用快捷键。", wrap=True)
+        self.result_label = label("请添加消息，然后在游戏前台使用快捷键。", "muted", True)
         layout.addWidget(self.result_label)
-        layout.addWidget(label("发送前请关闭游戏聊天框，并松开修饰键。程序无法确认聊天框状态或服务器送达。",
-                               "muted", True))
+        self.result_label.setToolTip("发送前请关闭游戏聊天框，并松开修饰键。程序无法确认聊天框状态或服务器送达。")
         self.timer = QTimer(self)
         self.timer.setInterval(100)
         self.timer.timeout.connect(self.refresh_status)
@@ -66,7 +71,7 @@ class MainWindow(QMainWindow):
         self.management.reload_messages()
         self.apply_font_size()
         if self.messages.count:
-            self.result_label.setText("就绪 · 在游戏前台使用快捷键，按顺序输入下一条消息。")
+            self.result_label.setText("游戏前台使用快捷键 · 发送前关闭聊天框并松开修饰键")
         if self.updater.preferences_error:
             self.result_label.setText("更新设置无法读取，暂用正式版渠道；可在设置页恢复。消息管理和快捷发送仍可使用。")
 
@@ -93,24 +98,37 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(style_for_font_size(self.config.value["font_size"]))
         self.management.next_label.update_height()
         self.management.progress_label.update_height()
+        self.management.resize_category_list()
         self.management.list_widget.doItemsLayout()
 
     def set_hotkey_status(self, status):
-        self.management.keys_label.setText(f"队伍：{status['team']}\n全体：{status['all']}")
         self.management.team_hint.setText(self.config.value["team_hotkey"])
         self.management.all_hint.setText(self.config.value["all_hotkey"])
+        details = f"队伍：{status['team']}\n全体：{status['all']}"
+        for hint, channel in ((self.management.team_hint, "team"), (self.management.all_hint, "all")):
+            hint.setToolTip(status[channel])
+        warnings = [f"{'队伍' if channel == 'team' else '全体'}：{value}" for channel, value in status.items()
+                    if "已注册" not in value]
+        self.management.keys_label.setText("\n".join(warnings))
+        self.management.keys_label.setVisible(bool(warnings))
+        self.management.keys_label.setToolTip(details)
 
     def refresh_status(self):
         with self.sender.lock:
             cid, count, index, next_row, current = self.messages.current_state()
             remaining = max(0, self.sender.ready_at - self.sender.clock())
             busy = self.sender.busy
-            state = ("正在输入" if busy else f"冷却 {remaining:.1f}s" if remaining
+            paused = self.sender.paused
+            state = ("已暂停" if paused else "正在输入" if busy else f"冷却 {remaining:.1f}s" if remaining
                      else "就绪" if count else "当前发送范围为空")
             current = current or "暂无消息"
         position = index + 1 if count else 0
         category = self.messages.category_name(cid) if cid else "未选择有效消息"
-        self.management.state_label.setText(f"● {state}  |  {position} / {count}\n{category}")
+        self.management.state_label.setText(f"● {state}" + (f" · {category}" if count else ""))
+        state_style = "color: #e9bd75;" if paused else "color: #68ded2;" if count else "color: #96a4b2;"
+        if self.management.state_label.styleSheet() != state_style:
+            self.management.state_label.setStyleSheet(state_style)
+        self.management.pause_button.setText("继续发送" if paused else "暂停发送")
         self.management.update_send_order()
         self.management.progress_label.setText(f'<span style="color:{RED}">{position:02d}</span>'
                                     f' <span style="font-size:{self.config.value["font_size"] + 9}px">/ {count:02d}</span>')

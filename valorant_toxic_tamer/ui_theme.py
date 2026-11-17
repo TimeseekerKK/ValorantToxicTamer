@@ -128,10 +128,10 @@ class CutButton(QPushButton):
 
 class UpdateButton(CutButton):
     def __init__(self, parent=None):
-        super().__init__("检查更新", parent, primary=True)
+        super().__init__("检查更新", parent)
         self.setProperty("updateIcon", True)
         self.setAccessibleName("检查更新")
-        self.setMinimumHeight(48)
+        self.setMinimumHeight(40)
         self.angle = 0
         self.animation = QTimer(self)
         self.animation.setInterval(40)
@@ -151,7 +151,7 @@ class UpdateButton(CutButton):
 
     def sizeHint(self):
         return QSize(self.fontMetrics().horizontalAdvance(self.text()) + 74,
-                     max(48, self.fontMetrics().height() + 24))
+                     max(40, self.fontMetrics().height() + 20))
 
 
 class TacticalCheckBox(QCheckBox):
@@ -286,8 +286,8 @@ class CutLineEdit(QLineEdit):
 
 class CutTabBar(QTabBar):
     def tabSizeHint(self, index):
-        return QSize(max(150, self.fontMetrics().horizontalAdvance(self.tabText(index)) + 44),
-                     max(48, self.fontMetrics().height() + 20))
+        return QSize(max(100, self.fontMetrics().horizontalAdvance(self.tabText(index)) + 36),
+                     max(40, self.fontMetrics().height() + 16))
 
     def paintEvent(self, event):
         p = QPainter(self)

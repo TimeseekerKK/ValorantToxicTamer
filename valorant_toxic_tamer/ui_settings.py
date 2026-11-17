@@ -1,7 +1,7 @@
 """Lazily constructed settings page and its validation/save workflow."""
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import (QFormLayout, QHBoxLayout, QLabel, QProgressBar,
+from PySide6.QtWidgets import (QApplication, QFormLayout, QHBoxLayout, QLabel, QProgressBar,
                                QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 from .app_version import VERSION
@@ -18,23 +18,27 @@ class SettingsPage(QWidget):
         super().__init__(host)
         self.host = host
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 16, 0, 0)
-        outer.setSpacing(16)
+        outer.setContentsMargins(0, 8, 0, 0)
+        outer.setSpacing(8)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         body = QWidget()
         columns = QHBoxLayout(body)
         columns.setContentsMargins(0, 0, 0, 0)
-        columns.setSpacing(16)
+        columns.setSpacing(12)
         left = Panel()
         controls = QVBoxLayout(left)
-        controls.setContentsMargins(24, 24, 24, 22)
-        controls.setSpacing(14)
-        controls.addWidget(label("聊天快捷键", "section"))
+        controls.setContentsMargins(16, 14, 16, 14)
+        controls.setSpacing(8)
+        heading = QHBoxLayout()
+        heading.addWidget(label("发送设置", "section"))
+        heading.addWidget(label("手动保存", "muted"))
+        heading.addStretch()
+        controls.addLayout(heading)
         form = QFormLayout()
-        form.setHorizontalSpacing(22)
-        form.setVerticalSpacing(16)
+        form.setHorizontalSpacing(14)
+        form.setVerticalSpacing(8)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         self.team_key, self.all_key = CutComboBox(), CutComboBox()
         for box in (self.team_key, self.all_key):
@@ -51,50 +55,49 @@ class SettingsPage(QWidget):
             caption = label(title)
             caption.setBuddy(control)
             form.addRow(caption, control)
-        controls.addLayout(form)
-        controls.addWidget(label("范围 0.2–2 秒，队伍与全体共用。", "muted", True))
-        controls.addWidget(label("两个频道需使用不同快捷键。", "muted", True))
         self.category_mode = CutComboBox(wheel_changes=False)
         self.category_mode.setAccessibleName("多类别发送方式")
         for mode, title in CATEGORY_MODES.items():
             self.category_mode.addItem(title, mode)
-        mode_form = QFormLayout()
-        mode_form.addRow("多类别发送方式", self.category_mode)
-        controls.addLayout(mode_form)
-        controls.addWidget(label("逐类：发完当前类别再换下一类。交替：每发一条换下一类。空类别自动跳过。", "muted", True))
+        form.addRow("多类别发送方式", self.category_mode)
+        controls.addLayout(form)
+        controls.addWidget(label("冷却 0.2–2 秒，两个频道共用；快捷键须不同。", "muted", True))
+        self.category_mode.setToolTip("逐类：发完当前类别再换下一类。交替：每发一条换下一类。空类别自动跳过。")
         controls.addWidget(separator())
-        controls.addWidget(label("界面显示", "section"))
+        controls.addWidget(label("界面与启动", "section"))
         self.font_size = CutComboBox(wheel_changes=False)
         self.font_size.setAccessibleName("字体大小")
         for size in FONT_SIZES:
             self.font_size.addItem(f"{size} px" + ("（默认）" if size == DEFAULT_CONFIG["font_size"] else ""), size)
         font_form = QFormLayout()
-        font_form.setHorizontalSpacing(22)
+        font_form.setHorizontalSpacing(14)
         font_caption = label("字体大小")
         font_caption.setBuddy(self.font_size)
         font_form.addRow(font_caption, self.font_size)
         controls.addLayout(font_form)
-        controls.addWidget(label("保存后调整界面字号，下次启动保留。", "muted", True))
-        controls.addWidget(separator())
-        controls.addWidget(label("启动与后台", "section"))
+        self.font_size.setToolTip("保存后调整界面字号，下次启动保留。")
         self.start_hidden = TacticalCheckBox("启动后隐藏到系统托盘")
         self.autostart = TacticalCheckBox("随 Windows 登录自动启动")
         controls.addWidget(self.start_hidden)
-        controls.addWidget(label("下次启动时生效", "muted"))
+        self.start_hidden.setToolTip("下次启动时生效。")
         controls.addWidget(self.autostart)
-        controls.addWidget(label("关闭窗口后继续在托盘运行，完全退出请使用托盘菜单。", "muted", True))
+        controls.addWidget(label("关闭窗口后仍在托盘运行；完全退出请使用托盘菜单。", "muted", True))
+        self.error_label = label("", "error", True)
+        self.error_label.setStyleSheet("color: #ff8290;")
+        self.error_label.hide()
+        controls.addWidget(self.error_label)
         controls.addStretch()
         columns.addWidget(left, 3)
 
         right = Panel()
-        right.setMinimumWidth(260)
+        right.setMinimumWidth(270)
         about = QVBoxLayout(right)
-        about.setContentsMargins(24, 24, 24, 22)
-        about.setSpacing(14)
-        about.addWidget(label("版本与更新", "section"))
+        about.setContentsMargins(16, 14, 16, 14)
+        about.setSpacing(8)
+        about.addWidget(label("关于与更新", "section"))
         brand_row = QHBoxLayout()
         brand_icon = QLabel()
-        brand_icon.setPixmap(self.host.windowIcon().pixmap(44, 44))
+        brand_icon.setPixmap(self.host.windowIcon().pixmap(32, 32))
         brand_row.addWidget(brand_icon)
         brand_details = QVBoxLayout()
         brand_details.addWidget(label("ValorantToxicTamer", wrap=True))
@@ -140,6 +143,14 @@ class SettingsPage(QWidget):
         path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         path_label.setToolTip(str(self.host.messages.path.parent))
         about.addWidget(path_label)
+        path_actions = QHBoxLayout()
+        self.open_data_button = CutButton("打开文件夹")
+        self.open_data_button.clicked.connect(self.open_data_folder)
+        self.copy_path_button = CutButton("复制路径")
+        self.copy_path_button.clicked.connect(self.copy_data_path)
+        path_actions.addWidget(self.open_data_button)
+        path_actions.addWidget(self.copy_path_button)
+        about.addLayout(path_actions)
         about.addStretch()
         columns.addWidget(right, 2)
         scroll.setWidget(body)
@@ -147,6 +158,9 @@ class SettingsPage(QWidget):
         footer = QHBoxLayout()
         self.settings_hint = label("修改后点击「保存设置」生效", "muted", True)
         footer.addWidget(self.settings_hint, 1)
+        self.discard_button = action_button(self, "放弃修改", self.load_settings)
+        self.discard_button.setToolTip("恢复已保存的常规设置；不会改变自动保存的更新渠道。")
+        footer.addWidget(self.discard_button)
         self.save_button = action_button(self, "保存设置", self.apply_settings, primary=True)
         self.save_button.setMinimumWidth(180)
         footer.addWidget(self.save_button)
@@ -168,6 +182,14 @@ class SettingsPage(QWidget):
         self.category_mode.setCurrentIndex(self.category_mode.findData(value["category_mode"]))
         self.settings_changed()
 
+    def open_data_folder(self):
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.host.messages.path.parent))):
+            self.host.error("无法打开数据文件夹，请复制路径后手动打开。")
+
+    def copy_data_path(self):
+        QApplication.clipboard().setText(str(self.host.messages.path.parent))
+        self.host.result_label.setText("本地数据路径已复制。")
+
     def settings_changed(self, *_):
         value = self.host.config.value
         try:
@@ -181,8 +203,11 @@ class SettingsPage(QWidget):
                    self.category_mode.currentData() != value["category_mode"] or
                    self.start_hidden.isChecked() != value["start_hidden"] or
                    self.autostart.isChecked() != value["autostart"])
-        self.settings_hint.setText("有未保存的修改 · 点击「保存设置」生效" if changed
-                                   else "设置已保存 · 修改后点击「保存设置」生效")
+        self.has_changes = changed
+        self.settings_hint.setText("有未保存的修改 · 保存后生效" if changed else "设置已保存")
+        self.settings_hint.setStyleSheet("color: #e9bd75;" if changed else "")
+        self.discard_button.setEnabled(changed and not self.host.sender.busy and not self.host.closing)
+        self.error_label.hide()
 
     def apply_settings(self):
         try:
@@ -205,5 +230,6 @@ class SettingsPage(QWidget):
             self.host.result_label.setText("设置已保存。")
             self.settings_changed()
         except (OSError, ValueError) as exc:
+            self.error_label.setText(f"未保存：{exc}")
+            self.error_label.show()
             self.host.error(exc)
-            self.load_settings()
