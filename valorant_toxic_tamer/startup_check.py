@@ -47,7 +47,7 @@ def run(app, report_path):
 
         def finish():
             result["settings_opened"] = controller.window.isVisible() and controller.window.tabs.currentIndex() == 1
-            result["update_button_available"] = controller.window.update_button.isEnabled()
+            result["update_button_available"] = controller.window.settings.update_button.isEnabled()
             result["updater_not_loaded_after_settings"] = "valorant_toxic_tamer.updater" not in sys.modules
             controller.window.close()
             result["close_hides"] = not controller.window.isVisible()
@@ -112,7 +112,7 @@ def run_update_check(app, report_path):
 
         def start():
             result["samples"].append(memory("before_check"))
-            window.update_button.click()
+            window.settings.update_button.click()
             monitor.start(100)
 
         def monitor_check():
@@ -126,7 +126,7 @@ def run_update_check(app, report_path):
             result["checks"] += 1
             result["samples"].append(memory(f"after_check_{result['checks']}"))
             if result["checks"] < 3:
-                window.update_button.click()
+                window.settings.update_button.click()
                 monitor.start(100)
             else:
                 result["tls_not_loaded_in_gui"] = all(name not in sys.modules for name in (

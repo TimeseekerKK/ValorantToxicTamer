@@ -1,0 +1,209 @@
+"""Lazily constructed settings page and its validation/save workflow."""
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import (QFormLayout, QHBoxLayout, QLabel, QProgressBar,
+                               QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
+
+from .app_version import VERSION
+from .config_manager import DEFAULT_CONFIG, FONT_SIZES, HOTKEYS
+from .message_manager import CATEGORY_MODES
+from .update_settings import RELEASES_PAGE, UPDATE_CHANNELS
+from .ui_theme import (CutButton, CutComboBox, CutLineEdit, Panel,
+                       TacticalCheckBox, UpdateButton)
+from .ui_widgets import action_button, label, separator
+
+
+class SettingsPage(QWidget):
+    def __init__(self, host):
+        super().__init__(host)
+        self.host = host
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 16, 0, 0)
+        outer.setSpacing(16)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        body = QWidget()
+        columns = QHBoxLayout(body)
+        columns.setContentsMargins(0, 0, 0, 0)
+        columns.setSpacing(16)
+        left = Panel()
+        controls = QVBoxLayout(left)
+        controls.setContentsMargins(24, 24, 24, 22)
+        controls.setSpacing(14)
+        controls.addWidget(label("聊天快捷键", "section"))
+        form = QFormLayout()
+        form.setHorizontalSpacing(22)
+        form.setVerticalSpacing(16)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        self.team_key, self.all_key = CutComboBox(), CutComboBox()
+        for box in (self.team_key, self.all_key):
+            box.addItems(HOTKEYS)
+        self.team_key.setAccessibleName("队伍聊天快捷键")
+        self.all_key.setAccessibleName("全体聊天快捷键")
+        self.cooldown = CutLineEdit(suffix="秒")
+        self.cooldown.setMaximumWidth(270)
+        self.cooldown.setMinimumWidth(130)
+        self.cooldown.setAccessibleName("共用发送冷却（秒）")
+        self.cooldown.setPlaceholderText("例如 0.8")
+        for title, control in (("队伍聊天快捷键", self.team_key),
+                               ("全体聊天快捷键", self.all_key), ("共用发送冷却", self.cooldown)):
+            caption = label(title)
+            caption.setBuddy(control)
+            form.addRow(caption, control)
+        controls.addLayout(form)
+        controls.addWidget(label("范围 0.2–2 秒，队伍与全体共用。", "muted", True))
+        controls.addWidget(label("两个频道需使用不同快捷键。", "muted", True))
+        self.category_mode = CutComboBox(wheel_changes=False)
+        self.category_mode.setAccessibleName("多类别发送方式")
+        for mode, title in CATEGORY_MODES.items():
+            self.category_mode.addItem(title, mode)
+        mode_form = QFormLayout()
+        mode_form.addRow("多类别发送方式", self.category_mode)
+        controls.addLayout(mode_form)
+        controls.addWidget(label("逐类：发完当前类别再换下一类。交替：每发一条换下一类。空类别自动跳过。", "muted", True))
+        controls.addWidget(separator())
+        controls.addWidget(label("界面显示", "section"))
+        self.font_size = CutComboBox(wheel_changes=False)
+        self.font_size.setAccessibleName("字体大小")
+        for size in FONT_SIZES:
+            self.font_size.addItem(f"{size} px" + ("（默认）" if size == DEFAULT_CONFIG["font_size"] else ""), size)
+        font_form = QFormLayout()
+        font_form.setHorizontalSpacing(22)
+        font_caption = label("字体大小")
+        font_caption.setBuddy(self.font_size)
+        font_form.addRow(font_caption, self.font_size)
+        controls.addLayout(font_form)
+        controls.addWidget(label("保存后调整界面字号，下次启动保留。", "muted", True))
+        controls.addWidget(separator())
+        controls.addWidget(label("启动与后台", "section"))
+        self.start_hidden = TacticalCheckBox("启动后隐藏到系统托盘")
+        self.autostart = TacticalCheckBox("随 Windows 登录自动启动")
+        controls.addWidget(self.start_hidden)
+        controls.addWidget(label("下次启动时生效", "muted"))
+        controls.addWidget(self.autostart)
+        controls.addWidget(label("关闭窗口后继续在托盘运行，完全退出请使用托盘菜单。", "muted", True))
+        controls.addStretch()
+        columns.addWidget(left, 3)
+
+        right = Panel()
+        right.setMinimumWidth(260)
+        about = QVBoxLayout(right)
+        about.setContentsMargins(24, 24, 24, 22)
+        about.setSpacing(14)
+        about.addWidget(label("版本与更新", "section"))
+        brand_row = QHBoxLayout()
+        brand_icon = QLabel()
+        brand_icon.setPixmap(self.host.windowIcon().pixmap(44, 44))
+        brand_row.addWidget(brand_icon)
+        brand_details = QVBoxLayout()
+        brand_details.addWidget(label("ValorantToxicTamer", wrap=True))
+        brand_details.addWidget(label(f"当前版本   V{VERSION}", "muted", True))
+        brand_row.addLayout(brand_details, 1)
+        about.addLayout(brand_row)
+        about.addWidget(separator())
+        self.update_channel = CutComboBox(wheel_changes=False)
+        self.update_channel.setAccessibleName("更新渠道")
+        for key, title in UPDATE_CHANNELS.items():
+            self.update_channel.addItem(title, key)
+        channel_caption = label("更新渠道 · 自动保存", "muted")
+        channel_caption.setBuddy(self.update_channel)
+        about.addWidget(channel_caption)
+        about.addWidget(self.update_channel)
+        self.update_channel_hint = label("", "muted", True)
+        about.addWidget(self.update_channel_hint)
+        self.repair_update_button = CutButton("恢复更新设置")
+        about.addWidget(self.repair_update_button)
+        self.update_button = UpdateButton()
+        self.update_button.clicked.connect(lambda: self.host.updater.check())
+        self.update_progress = QProgressBar()
+        self.update_progress.setAccessibleName("更新下载进度")
+        self.update_progress.setRange(0, 1000)
+        self.update_progress.hide()
+        self.cancel_update_button = CutButton("取消更新")
+        self.cancel_update_button.clicked.connect(self.host.updater.cancel_update)
+        self.cancel_update_button.hide()
+        self.host.updater.bind_widgets(self)
+        update_actions = QHBoxLayout()
+        update_actions.addWidget(self.update_button, 1)
+        update_actions.addWidget(self.cancel_update_button)
+        self.update_download_page = CutButton("打开下载页")
+        self.update_download_page.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl(RELEASES_PAGE)))
+        about.addLayout(update_actions)
+        about.addWidget(self.update_download_page)
+        about.addWidget(self.update_progress)
+        about.addWidget(separator())
+        about.addWidget(label("本地数据", "section"))
+        path_label = label(str(self.host.messages.path.parent), "muted", True)
+        path_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        path_label.setToolTip(str(self.host.messages.path.parent))
+        about.addWidget(path_label)
+        about.addStretch()
+        columns.addWidget(right, 2)
+        scroll.setWidget(body)
+        outer.addWidget(scroll, 1)
+        footer = QHBoxLayout()
+        self.settings_hint = label("修改后点击「保存设置」生效", "muted", True)
+        footer.addWidget(self.settings_hint, 1)
+        self.save_button = action_button(self, "保存设置", self.apply_settings, primary=True)
+        self.save_button.setMinimumWidth(180)
+        footer.addWidget(self.save_button)
+        outer.addLayout(footer)
+        for control in (self.team_key, self.all_key, self.font_size, self.category_mode):
+            control.currentIndexChanged.connect(self.settings_changed)
+        self.cooldown.textChanged.connect(self.settings_changed)
+        self.start_hidden.toggled.connect(self.settings_changed)
+        self.autostart.toggled.connect(self.settings_changed)
+
+    def load_settings(self):
+        value = self.host.config.value
+        self.team_key.setCurrentText(value["team_hotkey"])
+        self.all_key.setCurrentText(value["all_hotkey"])
+        self.cooldown.setText(str(value["cooldown"]))
+        self.start_hidden.setChecked(value["start_hidden"])
+        self.autostart.setChecked(value["autostart"])
+        self.font_size.setCurrentIndex(self.font_size.findData(value["font_size"]))
+        self.category_mode.setCurrentIndex(self.category_mode.findData(value["category_mode"]))
+        self.settings_changed()
+
+    def settings_changed(self, *_):
+        value = self.host.config.value
+        try:
+            cooldown = float(self.cooldown.text().strip())
+        except ValueError:
+            cooldown = None
+        changed = (self.team_key.currentText() != value["team_hotkey"] or
+                   self.all_key.currentText() != value["all_hotkey"] or
+                   cooldown != value["cooldown"] or
+                   self.font_size.currentData() != value["font_size"] or
+                   self.category_mode.currentData() != value["category_mode"] or
+                   self.start_hidden.isChecked() != value["start_hidden"] or
+                   self.autostart.isChecked() != value["autostart"])
+        self.settings_hint.setText("有未保存的修改 · 点击「保存设置」生效" if changed
+                                   else "设置已保存 · 修改后点击「保存设置」生效")
+
+    def apply_settings(self):
+        try:
+            try:
+                cooldown = float(self.cooldown.text().strip())
+            except ValueError:
+                raise ValueError("请输入有效的冷却时间（0.2–2 秒）。") from None
+            value = dict(team_hotkey=self.team_key.currentText(), all_hotkey=self.all_key.currentText(),
+                         cooldown=cooldown, start_hidden=self.start_hidden.isChecked(),
+                         autostart=self.autostart.isChecked(), font_size=self.font_size.currentData(),
+                         category_mode=self.category_mode.currentData())
+            font_changed = value["font_size"] != self.host.config.value["font_size"]
+            def save():
+                self.host.save_settings(value)
+                self.host.messages.set_mode(self.host.config.value["category_mode"])
+            self.host.sender.edit(save)
+            self.host.refresh_status()
+            if font_changed:
+                self.host.apply_font_size()
+            self.host.result_label.setText("设置已保存。")
+            self.settings_changed()
+        except (OSError, ValueError) as exc:
+            self.host.error(exc)
+            self.load_settings()

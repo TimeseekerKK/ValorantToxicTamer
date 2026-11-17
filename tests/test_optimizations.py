@@ -43,7 +43,7 @@ class IncrementalTests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_edit_preserves_unrelated_items_selection_and_scroll(self):
-        widget = self.window.list_widget
+        widget = self.window.management.list_widget
         first, selected = widget.item(0), widget.item(60)
         widget.setCurrentRow(60)
         widget.item(61).setSelected(True)
@@ -51,11 +51,11 @@ class IncrementalTests(unittest.TestCase):
         self.app.processEvents()
         scroll = widget.verticalScrollBar().value()
         keys = {self.messages.key_at(row) for row in (60, 61)}
-        self.window.change(lambda: self.messages.edit_message(60, "修改后的消息"))
+        self.window.management.change(lambda: self.messages.edit_message(60, "修改后的消息"))
         self.app.processEvents()
         self.assertIs(widget.item(0), first)
         self.assertIs(widget.item(60), selected)
-        self.assertEqual(self.window.selected_rows(), [60, 61])
+        self.assertEqual(self.window.management.selected_rows(), [60, 61])
         self.assertEqual({item.data(Qt.ItemDataRole.UserRole + 1) for item in widget.selectedItems()}, keys)
         self.assertEqual(widget.verticalScrollBar().value(), scroll)
         self.assertEqual(widget.item(60).data(Qt.ItemDataRole.UserRole), "修改后的消息")
@@ -64,16 +64,16 @@ class IncrementalTests(unittest.TestCase):
     def test_category_selection_reuses_controls_and_does_not_rebuild_message_index(self):
         cid = self.messages.create_category("类别")
         self.window.reload_messages()
-        first = self.window.send_categories.item(0)
-        second = self.window.send_categories.item(1)
+        first = self.window.management.send_categories.item(0)
+        second = self.window.management.send_categories.item(1)
         self.messages.advance()
         positions = self.messages._positions.copy()
         with patch.object(self.messages, "_rebuild") as rebuild:
             self.messages.select_categories([cid])
-            self.window.sync_categories()
+            self.window.management.sync_categories()
             rebuild.assert_not_called()
-        self.assertIs(self.window.send_categories.item(0), first)
-        self.assertIs(self.window.send_categories.item(1), second)
+        self.assertIs(self.window.management.send_categories.item(0), first)
+        self.assertIs(self.window.management.send_categories.item(1), second)
         self.assertEqual(self.messages._positions, positions)
         self.assertEqual(MessageManager(self.messages.path).selected_categories, [cid])
 
@@ -104,12 +104,12 @@ class IncrementalTests(unittest.TestCase):
             self.assertEqual(self.messages.path.read_bytes(), before)
 
     def test_bulk_delete_only_visible_selected_messages_and_keeps_other_items(self):
-        widget = self.window.list_widget
+        widget = self.window.management.list_widget
         widget.setCurrentRow(10)
         widget.item(11).setSelected(True)
         widget.item(20).setSelected(True)
-        self.window.search.setText("01")
-        self.window.filter_messages()
+        self.window.management.search.setText("01")
+        self.window.management.filter_messages()
         widget.item(10).setSelected(True)
         widget.item(11).setSelected(True)
         retained = widget.item(30)
@@ -118,7 +118,7 @@ class IncrementalTests(unittest.TestCase):
             observed.append(dialog.text())
             return QMessageBox.StandardButton.Yes
         with patch.object(QMessageBox, "exec", confirm):
-            self.window.delete_message()
+            self.window.management.delete_message()
         self.assertIn("2 条消息", observed[0])
         self.assertEqual(self.messages.count, 118)
         self.assertNotIn("消息 010", self.messages.messages)
@@ -128,12 +128,12 @@ class IncrementalTests(unittest.TestCase):
         self.assertEqual(MessageManager(self.messages.path).messages, self.messages.messages)
 
     def test_layout_cache_invalidates_on_text_width_and_font(self):
-        delegate = self.window.list_widget.itemDelegate()
-        index = self.window.list_widget.model().index(0, 0)
+        delegate = self.window.management.list_widget.itemDelegate()
+        index = self.window.management.list_widget.model().index(0, 0)
         option = QStyleOptionViewItem()
         first = delegate.sizeHint(option, index)
         self.assertEqual(delegate.sizeHint(option, index), first)
-        self.window.change(lambda: self.messages.edit_message(0, "长消息" * 200))
+        self.window.management.change(lambda: self.messages.edit_message(0, "长消息" * 200))
         self.assertGreater(delegate.sizeHint(option, index).height(), first.height())
         self.window.resize(840, 638)
         self.app.processEvents()

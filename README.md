@@ -4,7 +4,7 @@
 
 把常用消息按类别整理，在游戏中按快捷键发送到队伍或全体聊天。支持类别多选、独立发送进度、中文输入、消息搜索、TXT 导入导出，以及正式版 / Beta 双渠道更新。
 
-**运行平台：** Windows 10 / 11　·　**当前源码版本：** `v1.9.0-beta.1`
+**运行平台：** Windows 10 / 11　·　**当前源码版本：** `v1.9.0-beta.2`
 
 [下载程序](https://github.com/TimeseekerKK/ValorantToxicTamer/releases) · [快速开始](#快速开始) · [技术栈](#技术栈) · [使用方法](#使用方法) · [项目原理](#项目原理) · [项目结构与开发](#项目结构与开发) · [免责声明](#免责声明) · [许可证](#许可证)
 
@@ -237,7 +237,13 @@ ValorantToxicTamer/
 ├── main.py                    # 源码和打包共用的启动入口
 ├── valorant_toxic_tamer/       # 应用代码和随程序分发的更新脚本
 │   ├── app.py                 # 应用初始化和生命周期
-│   ├── ui.py / ui_theme.py    # 窗口和主题
+│   ├── ui.py                  # 主窗口、页签协调和退出生命周期
+│   ├── ui_management.py       # 消息管理页、增量列表、筛选和 TXT 操作
+│   ├── ui_settings.py         # 延迟创建的设置页、校验和保存
+│   ├── ui_categories.py       # 类别管理对话框
+│   ├── ui_import.py           # 导入线程和导入预览对话框
+│   ├── ui_widgets.py          # 通用控件、列表绘制和布局缓存
+│   ├── ui_theme.py            # 主题与样式
 │   ├── config_manager.py      # 配置存储和开机启动
 │   ├── message_manager.py     # 消息管理
 │   ├── hotkey.py / sender.py  # 快捷键和发送流程
@@ -255,6 +261,8 @@ ValorantToxicTamer/
 ```
 
 本地报告分类、辅助脚本和历史记录的存放约定见 [本地产物管理](docs/local-artifacts.md)。
+
+界面采用页面组合：`MainWindow.management` 持有消息管理控件、列表状态和导入任务，`MainWindow.settings` 在首次访问设置页时创建并持有设置控件。页面通过 `host` 使用共享服务和窗口提示；更新控制器显式绑定设置页。修改界面时在所属模块维护控件及操作，主窗口只协调页面、共享状态提示和生命周期。
 
 在项目根目录执行自动测试和构建：
 

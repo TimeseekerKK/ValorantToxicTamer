@@ -148,7 +148,7 @@ class Application(QObject):
         if self.sender.thread and self.sender.thread.is_alive():
             return
         if self.window is not None:
-            workers = (self.window.import_worker, self.window.updater.worker)
+            workers = (self.window.management.import_worker, self.window.updater.worker)
             if any(worker is not None and worker.isRunning() for worker in workers):
                 return
         self.quit_timer.stop()

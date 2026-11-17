@@ -15,7 +15,10 @@ from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QScrollArea, Q
 from valorant_toxic_tamer.config_manager import ConfigManager, DEFAULT_CONFIG, atomic_json
 from valorant_toxic_tamer.message_manager import ALL_CATEGORY, UNCATEGORIZED, MessageManager
 from valorant_toxic_tamer.sender import Sender
-from valorant_toxic_tamer.ui import CategoryManagerDialog, CategoryOrderDelegate, MainWindow, ImportDialog
+from valorant_toxic_tamer.ui import MainWindow
+from valorant_toxic_tamer.ui_categories import CategoryManagerDialog
+from valorant_toxic_tamer.ui_import import ImportDialog
+from valorant_toxic_tamer.ui_widgets import CategoryOrderDelegate
 from valorant_toxic_tamer.ui_theme import MessageDialog
 from test_core import FakeAPI
 
@@ -325,38 +328,38 @@ class CategoryUITests(unittest.TestCase):
         self.temp.cleanup()
 
     def check(self, cid, checked=True):
-        item = next(self.window.send_categories.item(i) for i in range(self.window.send_categories.count())
-                    if self.window.send_categories.item(i).data(Qt.ItemDataRole.UserRole) == cid)
+        item = next(self.window.management.send_categories.item(i) for i in range(self.window.management.send_categories.count())
+                    if self.window.management.send_categories.item(i).data(Qt.ItemDataRole.UserRole) == cid)
         item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
 
     def view(self, cid):
-        self.window.view_category.setCurrentIndex(self.window.view_category.findData(cid))
+        self.window.management.view_category.setCurrentIndex(self.window.management.view_category.findData(cid))
 
     def test_assigning_selected_messages_to_current_category_skips_reload(self):
         self.check(self.a)
         self.messages.advance()
         self.view(self.a)
-        self.window.list_widget.setCurrentRow(0)
-        self.window.list_widget.item(1).setSelected(True)
-        self.window.move_category.setCurrentIndex(self.window.move_category.findData(self.a))
+        self.window.management.list_widget.setCurrentRow(0)
+        self.window.management.list_widget.item(1).setSelected(True)
+        self.window.management.move_category.setCurrentIndex(self.window.management.move_category.findData(self.a))
         before = self.messages.path.read_bytes()
-        with patch.object(self.window, "reload_messages") as reload_messages, \
+        with patch.object(self.window.management, "reload_messages") as reload_messages, \
                 patch("valorant_toxic_tamer.message_manager.atomic_json") as save:
-            self.window.assign_category()
+            self.window.management.assign_category()
             save.assert_not_called()
             reload_messages.assert_not_called()
         self.assertEqual(self.messages.current, "A2")
-        self.assertEqual(self.window.selected_rows(), [0, 1])
+        self.assertEqual(self.window.management.selected_rows(), [0, 1])
         self.assertEqual(self.messages.path.read_bytes(), before)
         self.assertIn("未变化", self.window.result_label.text())
 
     def test_unchanged_category_name_skips_both_list_reloads(self):
-        dialog = CategoryManagerDialog(self.window)
+        dialog = CategoryManagerDialog(self.window.management)
         self.addCleanup(dialog.deleteLater)
         self.check(self.a)
         self.messages.advance()
         with patch.object(MessageDialog, "exec", return_value=QDialog.DialogCode.Accepted), \
-                patch.object(self.window, "reload_messages") as reload_messages, \
+                patch.object(self.window.management, "reload_messages") as reload_messages, \
                 patch.object(dialog, "reload_categories") as reload_categories, \
                 patch("valorant_toxic_tamer.message_manager.atomic_json") as save:
             dialog.rename_category(self.a)
@@ -370,7 +373,7 @@ class CategoryUITests(unittest.TestCase):
         self.check(self.b)
         self.check(self.a)
         self.assertEqual(self.messages.selected_categories, [self.b, self.a])
-        self.assertIn("战术 → 鼓励", self.window.send_order_label.text())
+        self.assertIn("战术 → 鼓励", self.window.management.send_order_label.text())
         self.check(self.b, False)
         self.check(self.b)
         self.assertEqual(self.messages.selected_categories, [self.a, self.b])
@@ -385,8 +388,8 @@ class CategoryUITests(unittest.TestCase):
 
         def assert_order(expected):
             selected = []
-            for row in range(self.window.send_categories.count()):
-                item = self.window.send_categories.item(row)
+            for row in range(self.window.management.send_categories.count()):
+                item = self.window.management.send_categories.item(row)
                 cid = item.data(Qt.ItemDataRole.UserRole)
                 self.assertEqual(item.text(),
                                  f"{self.messages.category_name(cid)} ({len(self.messages.rows_for(cid))})")
@@ -419,22 +422,22 @@ class CategoryUITests(unittest.TestCase):
         self.messages.advance()
         before = self.messages.path.read_bytes()
         self.view(self.b)
-        self.window.search.setText("B2")
-        self.window.filter_messages()
-        self.assertEqual(self.window.count_label.text(), "1 / 2 条")
-        self.assertEqual(self.window.list_widget.currentRow(), 3)
+        self.window.management.search.setText("B2")
+        self.window.management.filter_messages()
+        self.assertEqual(self.window.management.count_label.text(), "1 / 2 条")
+        self.assertEqual(self.window.management.list_widget.currentRow(), 3)
         self.assertEqual(self.messages.current, "A2")
         self.assertEqual(self.messages.selected_categories, [self.a])
         self.assertEqual(self.messages.path.read_bytes(), before)
 
     def test_batch_move_uses_visible_selected_rows_and_keeps_text(self):
         self.view(self.a)
-        self.window.list_widget.item(1).setSelected(True)
-        self.window.move_category.setCurrentIndex(self.window.move_category.findData(self.b))
-        self.window.assign_category()
+        self.window.management.list_widget.item(1).setSelected(True)
+        self.window.management.move_category.setCurrentIndex(self.window.management.move_category.findData(self.b))
+        self.window.management.assign_category()
         self.assertEqual(self.messages.rows_for(self.b), [0, 1, 2, 3])
         self.assertEqual(self.messages.messages, ["A1", "A2", "B1", "B2"])
-        self.assertEqual(self.window.count_label.text(), "0 条")
+        self.assertEqual(self.window.management.count_label.text(), "0 条")
 
     def test_add_in_view_goes_to_viewed_category(self):
         self.view(self.b)
@@ -442,14 +445,14 @@ class CategoryUITests(unittest.TestCase):
             dialog.input.setText("B3")
             return QDialog.DialogCode.Accepted
         with patch.object(MessageDialog, "exec", confirm):
-            self.window.add_message()
+            self.window.management.add_message()
         self.assertEqual(self.messages.category_for(4), self.b)
         self.assertEqual(self.messages.selected_categories, [ALL_CATEGORY])
 
     def test_clearing_view_only_deletes_that_category(self):
         self.view(self.b)
         with patch.object(QMessageBox, "exec", return_value=QMessageBox.StandardButton.Yes):
-            self.window.clear_messages()
+            self.window.management.clear_messages()
         self.assertEqual(self.messages.messages, ["A1", "A2"])
         self.assertEqual(self.messages.rows_for(self.a), [0, 1])
 
@@ -457,16 +460,16 @@ class CategoryUITests(unittest.TestCase):
         self.messages.swap(1, 2)
         self.window.reload_messages()
         self.view(self.a)
-        self.window.list_widget.setCurrentRow(0)
-        self.window.move(1)
+        self.window.management.list_widget.setCurrentRow(0)
+        self.window.management.move(1)
         self.assertEqual(self.messages.messages, ["A2", "B1", "A1", "B2"])
         self.assertEqual(self.messages.category_for(1), self.b)
 
     def test_save_mode_changes_runtime_and_survives_restart(self):
         self.window.ensure_settings()
-        self.window.category_mode.setCurrentIndex(self.window.category_mode.findData("alternating"))
-        self.assertIn("未保存", self.window.settings_hint.text())
-        self.window.apply_settings()
+        self.window.settings.category_mode.setCurrentIndex(self.window.settings.category_mode.findData("alternating"))
+        self.assertIn("未保存", self.window.settings.settings_hint.text())
+        self.window.settings.apply_settings()
         self.assertEqual(self.messages.mode, "alternating")
         self.assertEqual(ConfigManager(self.config.path).value["category_mode"], "alternating")
 
@@ -478,7 +481,7 @@ class CategoryUITests(unittest.TestCase):
         self.window.error.assert_called_once()
         self.assertEqual(before, self.messages.path.read_bytes())
         self.assertEqual(self.messages.selected_categories, [ALL_CATEGORY])
-        self.assertFalse(self.window.send_categories.isEnabled())
+        self.assertFalse(self.window.management.send_categories.isEnabled())
         self.sender.busy = False
 
     def test_import_goes_to_viewed_category_and_preserves_other_membership(self):
@@ -489,21 +492,21 @@ class CategoryUITests(unittest.TestCase):
             self.assertEqual(dialog.destination_label.text(), "目标类别：战术")
             self.assertFalse(dialog.destination_label.isHidden())
             return QDialog.DialogCode.Accepted
-        with patch("valorant_toxic_tamer.ui.QFileDialog.getOpenFileName", return_value=(str(source), "")), \
+        with patch("valorant_toxic_tamer.ui_management.QFileDialog.getOpenFileName", return_value=(str(source), "")), \
                 patch.object(ImportDialog, "exec", confirm):
-            self.window.import_txt()
+            self.window.management.import_txt()
             for _ in range(500):
-                if self.window.import_worker is None:
+                if self.window.management.import_worker is None:
                     break
                 QTest.qWait(10)
-        self.assertIsNone(self.window.import_worker)
+        self.assertIsNone(self.window.management.import_worker)
         self.window.error.assert_not_called()
         self.assertEqual(self.messages.rows_for(self.a), [0, 1])
         self.assertEqual(self.messages.rows_for(self.b), [2, 3, 4, 5])
         self.assertEqual(self.messages.messages[-2:], ["新增战术", "B1"])
 
     def test_category_dialogs_and_delete_keep_messages(self):
-        dialog = CategoryManagerDialog(self.window)
+        dialog = CategoryManagerDialog(self.window.management)
         self.addCleanup(dialog.deleteLater)
         def confirm(editor):
             self.assertEqual(editor.windowTitle(), "新建类别")
@@ -514,7 +517,7 @@ class CategoryUITests(unittest.TestCase):
             dialog.create_button.click()
         cid = self.messages.categories[-1]["id"]
         self.assertEqual(self.messages.category_name(cid), "新类别")
-        self.assertEqual(self.window.view_category.currentData(), ALL_CATEGORY)
+        self.assertEqual(self.window.management.view_category.currentData(), ALL_CATEGORY)
         self.assertNotIn(cid, self.messages.selected_categories)
         with patch.object(QMessageBox, "exec", return_value=QMessageBox.StandardButton.Yes):
             dialog.delete_category(self.a)
@@ -527,19 +530,19 @@ class CategoryUITests(unittest.TestCase):
         self.window.resize(840, 638)
         self.window.show()
         self.app.processEvents()
-        for widget in (self.window.view_category, self.window.manage_categories_button,
-                       self.window.move_category, self.window.assign_category_button):
+        for widget in (self.window.management.view_category, self.window.management.manage_categories_button,
+                       self.window.management.move_category, self.window.management.assign_category_button):
             self.assertTrue(widget.parentWidget().rect().contains(widget.geometry()))
         self.window.tabs.setCurrentIndex(1)
         self.app.processEvents()
         scroll = self.window.tabs.widget(1).findChild(QScrollArea)
-        scroll.ensureWidgetVisible(self.window.category_mode)
+        scroll.ensureWidgetVisible(self.window.settings.category_mode)
         self.app.processEvents()
         self.assertTrue(scroll.viewport().rect().contains(
-            self.window.category_mode.mapTo(scroll.viewport(), self.window.category_mode.rect().bottomRight())))
+            self.window.settings.category_mode.mapTo(scroll.viewport(), self.window.settings.category_mode.rect().bottomRight())))
 
     def category_dialog(self):
-        dialog = CategoryManagerDialog(self.window)
+        dialog = CategoryManagerDialog(self.window.management)
         self.addCleanup(dialog.deleteLater)
         return dialog
 
@@ -549,16 +552,16 @@ class CategoryUITests(unittest.TestCase):
         self.view(self.b)
         before = self.messages.path.read_bytes()
         def close(dialog):
-            self.assertIs(self.window.category_dialog, dialog)
+            self.assertIs(self.window.management.category_dialog, dialog)
             self.assertEqual(dialog.table.rowCount(), 4)
             self.assertFalse(any(b.text() == "添加消息" for b in dialog.findChildren(QPushButton)))
             return QDialog.DialogCode.Accepted
         with patch.object(CategoryManagerDialog, "exec", close):
-            self.window.manage_categories()
+            self.window.management.manage_categories()
         self.assertEqual(self.messages.path.read_bytes(), before)
         self.assertEqual(self.messages.current, "A2")
-        self.assertEqual(self.window.view_category.currentData(), self.b)
-        self.assertIsNone(self.window.category_dialog)
+        self.assertEqual(self.window.management.view_category.currentData(), self.b)
+        self.assertIsNone(self.window.management.category_dialog)
 
     def test_category_manager_rename_row_preserves_progress_and_selection(self):
         self.check(self.a)
@@ -574,7 +577,7 @@ class CategoryUITests(unittest.TestCase):
         self.assertEqual(self.messages.category_name(self.a), "友好交流")
         self.assertEqual(self.messages.current, "A2")
         self.assertEqual(self.messages.selected_categories, [self.a])
-        self.assertEqual(self.window.view_category.currentText(), "友好交流")
+        self.assertEqual(self.window.management.view_category.currentText(), "友好交流")
 
     def test_category_manager_cancel_delete_and_builtin_rows_keep_data(self):
         dialog = self.category_dialog()
@@ -622,7 +625,7 @@ class CategoryUITests(unittest.TestCase):
         before = self.messages.path.read_bytes()
         self.sender.busy = True
         with patch.object(CategoryManagerDialog, "exec") as execute:
-            self.window.manage_categories()
+            self.window.management.manage_categories()
         execute.assert_not_called()
         dialog.update_actions()
         self.assertFalse(dialog.create_button.isEnabled())
@@ -658,9 +661,9 @@ class CategoryUITests(unittest.TestCase):
             dialog.input.setText("明确加入战术")
             return QDialog.DialogCode.Accepted
         with patch.object(MessageDialog, "exec", confirm):
-            self.window.add_message()
+            self.window.management.add_message()
         self.assertEqual(self.messages.category_for(4), self.b)
-        self.assertEqual(self.window.view_category.currentData(), self.a)
+        self.assertEqual(self.window.management.view_category.currentData(), self.a)
         self.assertEqual(self.messages.selected_categories, [ALL_CATEGORY])
 
     def test_all_filter_defaults_add_destination_to_uncategorized(self):
@@ -669,17 +672,17 @@ class CategoryUITests(unittest.TestCase):
             return QDialog.DialogCode.Rejected
         before = self.messages.path.read_bytes()
         with patch.object(MessageDialog, "exec", confirm):
-            self.window.add_message()
+            self.window.management.add_message()
         self.assertEqual(self.messages.path.read_bytes(), before)
 
     def test_assignment_bar_is_hidden_without_selection(self):
-        self.window.list_widget.clearSelection()
-        self.window.update_actions()
-        self.assertTrue(self.window.batch_category_bar.isHidden())
-        self.window.list_widget.item(0).setSelected(True)
-        self.window.update_actions()
-        self.assertFalse(self.window.batch_category_bar.isHidden())
-        self.assertEqual(self.window.assign_category_button.text(), "修改所属类别")
+        self.window.management.list_widget.clearSelection()
+        self.window.management.update_actions()
+        self.assertTrue(self.window.management.batch_category_bar.isHidden())
+        self.window.management.list_widget.item(0).setSelected(True)
+        self.window.management.update_actions()
+        self.assertFalse(self.window.management.batch_category_bar.isHidden())
+        self.assertEqual(self.window.management.assign_category_button.text(), "修改所属类别")
 
     def test_category_row_actions_are_not_clipped_at_largest_font(self):
         self.config.save({**self.config.value, "font_size": 16})

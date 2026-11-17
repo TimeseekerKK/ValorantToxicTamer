@@ -43,21 +43,21 @@ class UpdateRecoveryTests(unittest.TestCase):
     def test_broken_preference_preserved_while_messages_remain_editable(self):
         self.assertEqual(self.window.updater.channel, "stable")
         self.assertIsNotNone(self.window.updater.preferences_error)
-        self.window.change(lambda: self.messages.replace(["仍可使用"]))
+        self.window.management.change(lambda: self.messages.replace(["仍可使用"]))
         self.assertEqual(self.messages.messages, ["仍可使用"])
         self.assertEqual(self.path.read_bytes(), b'{ broken')
         self.window.tabs.setCurrentIndex(1)
-        self.assertFalse(self.window.repair_update_button.isHidden())
+        self.assertFalse(self.window.settings.repair_update_button.isHidden())
 
     def test_repair_backs_up_exact_bytes_and_survives_restart(self):
         self.window.tabs.setCurrentIndex(1)
-        self.window.repair_update_button.click()
+        self.window.settings.repair_update_button.click()
         backups = list(self.root.glob("update_settings.invalid-*.json"))
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_bytes(), b'{ broken')
         self.assertEqual(json.loads(self.path.read_text()), {"channel": "stable"})
         self.assertIsNone(self.window.updater.preferences_error)
-        self.assertTrue(self.window.repair_update_button.isHidden())
+        self.assertTrue(self.window.settings.repair_update_button.isHidden())
         restarted = MainWindow(self.messages, self.config, self.sender, self.config.save)
         self.assertIsNone(restarted.updater.preferences_error)
         restarted.shutdown()
@@ -65,7 +65,7 @@ class UpdateRecoveryTests(unittest.TestCase):
 
     def test_changing_channel_also_preserves_damaged_original(self):
         self.window.tabs.setCurrentIndex(1)
-        self.window.update_channel.setCurrentIndex(self.window.update_channel.findData("beta"))
+        self.window.settings.update_channel.setCurrentIndex(self.window.settings.update_channel.findData("beta"))
         self.assertEqual(self.window.updater.channel, "beta")
         self.assertEqual(next(self.root.glob("update_settings.invalid-*.json")).read_bytes(), b'{ broken')
         self.assertEqual(json.loads(self.path.read_text()), {"channel": "beta"})
@@ -73,17 +73,17 @@ class UpdateRecoveryTests(unittest.TestCase):
     def test_backup_failure_does_not_overwrite_original_or_change_channel(self):
         self.window.tabs.setCurrentIndex(1)
         with patch("valorant_toxic_tamer.update_controller.shutil.copyfile", side_effect=OSError("denied")):
-            self.window.update_channel.setCurrentIndex(self.window.update_channel.findData("beta"))
+            self.window.settings.update_channel.setCurrentIndex(self.window.settings.update_channel.findData("beta"))
         self.assertEqual(self.path.read_bytes(), b'{ broken')
         self.assertEqual(self.window.updater.channel, "stable")
-        self.assertEqual(self.window.update_channel.currentData(), "stable")
+        self.assertEqual(self.window.settings.update_channel.currentData(), "stable")
         self.window.error.assert_called_once()
 
     def test_failed_repair_keeps_original_and_recovery_available(self):
         self.window.tabs.setCurrentIndex(1)
         with patch("valorant_toxic_tamer.update_controller.atomic_json", side_effect=OSError("disk full")):
-            self.window.repair_update_button.click()
+            self.window.settings.repair_update_button.click()
         self.assertEqual(self.path.read_bytes(), b'{ broken')
         self.assertIsNotNone(self.window.updater.preferences_error)
-        self.assertFalse(self.window.repair_update_button.isHidden())
+        self.assertFalse(self.window.settings.repair_update_button.isHidden())
         self.window.error.assert_called_once()

@@ -42,7 +42,7 @@ def main():
         window = PreviewWindow(messages, config, sender, config.save)
         window.setWindowTitle("ValorantToxicTamer · UI 预览")
         window.set_hotkey_status({"team": "F8 · 预览（未注册）", "all": "F9 · 预览（未注册）"})
-        window.list_widget.setCurrentRow(3)
+        window.management.list_widget.setCurrentRow(3)
         window.show()
 
         def capture():

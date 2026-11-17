@@ -90,6 +90,7 @@ def run(report_path, started):
         app.processEvents()
         sample("window_open", began)
         window = controller.window
+        management = getattr(window, "management", window)
         result["font_family"] = QFontInfo(window.font()).family()
         try:
             began = time.perf_counter()
@@ -103,12 +104,12 @@ def run(report_path, started):
             app.processEvents()
             sample("load_5000", began)
             began = time.perf_counter()
-            window.search.setText("00499")
-            window.filter_messages()
+            management.search.setText("00499")
+            management.filter_messages()
             app.processEvents()
             sample("search_5000", began)
-            window.search.clear()
-            window.filter_messages()
+            management.search.clear()
+            management.filter_messages()
             source = Path(directory) / "import.txt"
             source.write_text("\n".join(f"导入消息 {i}" for i in range(1000)), encoding="utf-8")
             began = time.perf_counter()
@@ -127,7 +128,7 @@ def run(report_path, started):
                 window.reload_messages()
                 app.processEvents()
                 began = time.perf_counter()
-                window.send_categories.item(0).setCheckState(Qt.CheckState.Unchecked)
+                management.send_categories.item(0).setCheckState(Qt.CheckState.Unchecked)
                 app.processEvents()
                 sample(f"select_{count}", began)
                 began = time.perf_counter()
