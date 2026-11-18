@@ -179,7 +179,7 @@ def run(report_path, started):
             window.reveal()
             app.processEvents()
             sample("window_restored", began)
-            if management.list_widget.count() != controller.messages.count:
+            if management.list_widget.count() != len(controller.messages.messages):
                 raise RuntimeError("Hidden-window message list did not restore")
             result["tls_not_loaded_in_gui"] = all(name not in sys.modules for name in (
                 "ssl", "truststore", "valorant_toxic_tamer.updater"))
