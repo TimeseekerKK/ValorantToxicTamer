@@ -1,7 +1,7 @@
 """Shared, dependency-free Qt widget styling for the desktop UI."""
 import re
 
-from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt, QTimer, QVariantAnimation
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTabBar, QVBoxLayout, QWidget)
@@ -61,17 +61,18 @@ def cut_path(rect, cut=8):
     return path
 
 
-def paint_button(button):
+def paint_button(button, feedback):
     p = QPainter(button)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     primary = bool(button.property("primary"))
     enabled = button.isEnabled()
     hovered = button.underMouse() and enabled
+    pressed = button.isDown() and enabled
     top, bottom = (PRIMARY_RED, "#891e31") if primary else ("#25323f", "#192530")
     border = PRIMARY_BORDER if primary else "#4a5d6e"
     if hovered:
         top, bottom = ("#ba2e45", "#9c263c") if primary else ("#334453", "#233340")
-    if button.isDown():
+    if pressed:
         top = bottom = "#801b2d" if primary else "#14202b"
     if not enabled:
         top = bottom = "#16212b"
@@ -83,7 +84,17 @@ def paint_button(button):
     gradient.setColorAt(1, QColor(bottom))
     p.setPen(QPen(QColor(border), 1.2))
     p.setBrush(gradient)
-    p.drawPath(cut_path(QRectF(button.rect()).adjusted(0.8, 0.8, -0.8, -0.8)))
+    rect = QRectF(button.rect())
+    p.drawPath(cut_path(rect.adjusted(0.8, 0.8, -0.8, -0.8)))
+    if pressed or feedback > 0:
+        highlight = cut_path(rect.adjusted(1.2, 1.2, -1.2, -1.2))
+        p.setOpacity(1.0 if pressed else feedback)
+        p.setPen(QPen(QColor("#ffd0d6" if primary else "#b8d9f1"), 2))
+        p.setBrush(QColor(255, 255, 255, 30))
+        p.drawPath(highlight)
+        p.setOpacity(1.0)
+    if pressed:
+        p.translate(0, 1)
     p.setPen(QColor(TEXT if enabled else "#62717f"))
     p.setFont(button.font())
     update_icon = bool(button.property("updateIcon"))
@@ -111,6 +122,30 @@ def paint_button(button):
                Qt.AlignmentFlag.AlignCenter, button.text().replace("&", ""))
 
 
+class _ButtonSkin(QObject):
+    """Paint the shared button feedback while Qt handles activation."""
+    def __init__(self, button):
+        super().__init__(button)
+        self.feedback = QVariantAnimation(self)
+        self.feedback.setStartValue(1.0)
+        self.feedback.setEndValue(0.0)
+        self.feedback.setDuration(220)
+        self.feedback.valueChanged.connect(button.update)
+        button.clicked.connect(self._flash)
+        button.installEventFilter(self)
+
+    def _flash(self):
+        self.feedback.stop()
+        self.feedback.start()
+
+    def eventFilter(self, button, event):
+        if event.type() == QEvent.Type.Paint:
+            running = self.feedback.state() == QVariantAnimation.State.Running
+            paint_button(button, self.feedback.currentValue() if running else 0.0)
+            return True
+        return super().eventFilter(button, event)
+
+
 class CutButton(QPushButton):
     def __init__(self, text, parent=None, *, primary=False):
         super().__init__(text, parent)
@@ -119,13 +154,11 @@ class CutButton(QPushButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAutoDefault(False)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover)
+        _ButtonSkin(self)
 
     def sizeHint(self):
         return QSize(self.fontMetrics().horizontalAdvance(self.text()) +
                      (60 if not self.icon().isNull() else 38), max(42, self.fontMetrics().height() + 20))
-
-    def paintEvent(self, event):
-        paint_button(self)
 
 
 class UpdateButton(CutButton):
@@ -173,15 +206,6 @@ class TacticalCheckBox(QCheckBox):
                    Qt.AlignmentFlag.AlignVCenter, self.text())
 
 
-class _ButtonSkin(QObject):
-    """Keep QMessageBox's standard buttons and return codes intact."""
-    def eventFilter(self, button, event):
-        if event.type() == QEvent.Type.Paint:
-            paint_button(button)
-            return True
-        return super().eventFilter(button, event)
-
-
 def style_message_box(dialog, primary=None):
     parent = dialog.parentWidget()
     dialog.setStyleSheet(parent.styleSheet() if parent else STYLE)
@@ -191,8 +215,7 @@ def style_message_box(dialog, primary=None):
         button.setProperty("primary", dialog.standardButton(button) == primary)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         button.setAttribute(Qt.WidgetAttribute.WA_Hover)
-        skin = _ButtonSkin(button)
-        button.installEventFilter(skin)
+        _ButtonSkin(button)
 
 
 class Panel(QWidget):
