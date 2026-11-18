@@ -206,8 +206,13 @@ class SettingsPage(QWidget):
         self.has_changes = changed
         self.settings_hint.setText("有未保存的修改 · 保存后生效" if changed else "设置已保存")
         self.settings_hint.setStyleSheet("color: #e9bd75;" if changed else "")
-        self.discard_button.setEnabled(changed and not self.host.sender.busy and not self.host.closing)
+        self.update_save_actions(self.host.management.can_edit())
         self.error_label.hide()
+
+    def update_save_actions(self, idle):
+        enabled = idle and self.has_changes
+        self.save_button.setEnabled(enabled)
+        self.discard_button.setEnabled(enabled)
 
     def apply_settings(self):
         try:

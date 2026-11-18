@@ -1,10 +1,11 @@
 """Shared UI primitives and list rendering; no persistence or page workflows."""
 from collections import OrderedDict
+from html import escape
 
-from PySide6.QtCore import QRect, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QRect, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPen
 from PySide6.QtWidgets import (QFrame, QLabel, QListWidget, QSizePolicy, QStyledItemDelegate,
-                               QStyle, QStyleOptionViewItem)
+                               QStyle, QStyleOptionViewItem, QToolTip)
 
 from .ui_theme import MUTED, RED, TEXT, CutButton
 
@@ -61,10 +62,17 @@ class MessageDelegate(QStyledItemDelegate):
         self._column_key = None
         self._column_widths = None
         self._sizes = OrderedDict()
+        self._show_categories = False
+
+    def set_show_categories(self, show):
+        if self._show_categories != show:
+            self._show_categories = show
+            self.page.list_widget.scheduleDelayedItemsLayout()
 
     def column_widths(self):
         digits = max(2, len(str(self.page.list_widget.count())))
-        key = (self.page.host.config.value["font_size"], self.page.list_widget.logicalDpiX(), digits)
+        key = (self.page.host.config.value["font_size"], self.page.list_widget.logicalDpiX(),
+               digits, self._show_categories)
         if key == self._column_key:
             return self._column_widths
         metrics = self.page.list_widget.fontMetrics()
@@ -72,13 +80,14 @@ class MessageDelegate(QStyledItemDelegate):
         upcoming_font = QFont(self.page.list_widget.font())
         upcoming_font.setPixelSize(max(8, upcoming_font.pixelSize() - 1))
         upcoming = max(60, QFontMetrics(upcoming_font).horizontalAdvance("下一条"))
+        category = metrics.horizontalAdvance("五字类别名") + 16 if self._show_categories else 0
         self._column_key = key
-        self._column_widths = number, upcoming
+        self._column_widths = number, upcoming, category
         return self._column_widths
 
     def sizeHint(self, option, index):
-        number, upcoming = self.column_widths()
-        reserved = number + upcoming + 40
+        number, upcoming, category = self.column_widths()
+        reserved = number + upcoming + category + 40
         width = max(1, self.page.list_widget.viewport().width() - reserved)
         text = index.data(Qt.ItemDataRole.UserRole) or ""
         key = (text, self._column_key, width, reserved)
@@ -94,11 +103,24 @@ class MessageDelegate(QStyledItemDelegate):
             self._sizes.popitem(last=False)
         return size
 
+    def category_rect(self, rect, upcoming_width, category_width):
+        return QRect(rect.right() - upcoming_width - category_width - 14,
+                     rect.center().y() - 12, category_width, 24)
+
+    def helpEvent(self, event, view, option, index):
+        _, upcoming_width, category_width = self.column_widths()
+        if (event.type() == QEvent.Type.ToolTip and category_width
+                and self.category_rect(option.rect, upcoming_width, category_width).contains(event.pos())):
+            name = index.data(Qt.ItemDataRole.AccessibleDescriptionRole) or ""
+            QToolTip.showText(event.globalPos(), escape(name), view)
+            return True
+        return super().helpEvent(event, view, option, index)
+
     def paint(self, painter, option, index):
         painter.save()
         painter.setClipRect(option.rect)
         rect = option.rect
-        number_width, upcoming_width = self.column_widths()
+        number_width, upcoming_width, category_width = self.column_widths()
         upcoming = index.row() == self.page.next_index
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         if selected:
@@ -115,9 +137,20 @@ class MessageDelegate(QStyledItemDelegate):
                          Qt.AlignmentFlag.AlignVCenter, f"{index.row() + 1:02d}")
         painter.setPen(QColor(TEXT))
         painter.drawText(QRect(rect.left() + number_width + 24, rect.top() + 9,
-                               rect.width() - number_width - upcoming_width - 40, rect.height() - 18),
+                               rect.width() - number_width - upcoming_width - category_width - 40,
+                               rect.height() - 18),
                          Qt.TextFlag.TextWordWrap | Qt.AlignmentFlag.AlignVCenter,
                          index.data(Qt.ItemDataRole.UserRole) or "")
+        if category_width:
+            name = index.data(Qt.ItemDataRole.AccessibleDescriptionRole) or ""
+            metrics = option.fontMetrics
+            name = metrics.elidedText(name, Qt.TextElideMode.ElideRight, category_width - 12)
+            badge = self.category_rect(rect, upcoming_width, category_width)
+            badge.setWidth(metrics.horizontalAdvance(name) + 12)
+            painter.setPen(QColor("#536575"))
+            painter.drawRect(badge)
+            painter.setPen(QColor(MUTED))
+            painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, name)
         if upcoming:
             font = QFont(option.font)
             font.setPixelSize(max(8, font.pixelSize() - 1))
@@ -168,6 +201,35 @@ class WrappingLabel(QLabel):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.update_height()
+
+
+class ElidingLabel(QLabel):
+    def __init__(self, name):
+        super().__init__()
+        self.full_text = ""
+        self.setObjectName(name)
+        self.setTextFormat(Qt.TextFormat.PlainText)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+    def set_full_text(self, text):
+        if text != self.full_text:
+            self.full_text = text
+            self.setAccessibleName(text)
+            self.setToolTip(escape(text))
+            self.update_display()
+
+    def update_display(self):
+        self.setText(self.fontMetrics().elidedText(
+            self.full_text, Qt.TextElideMode.ElideRight, self.contentsRect().width()))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update_display()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.FontChange:
+            self.update_display()
 
 
 def action_button(parent, text, action, *, primary=False, icon=None):

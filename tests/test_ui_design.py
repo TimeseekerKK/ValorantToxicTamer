@@ -145,12 +145,25 @@ class DesignUITests(unittest.TestCase):
 
     def test_cooldown_save_does_not_reapply_font_style(self):
         self.window.tabs.setCurrentIndex(1)
+        settings = self.window.settings
+        self.assertFalse(settings.save_button.isEnabled())
+        self.assertFalse(settings.discard_button.isEnabled())
         with patch.object(self.window, "apply_font_size") as restyle:
-            self.window.settings.cooldown.setText("0.8")
-            self.window.settings.apply_settings()
+            settings.cooldown.setText("0.8")
+            self.assertTrue(settings.save_button.isEnabled())
+            self.assertTrue(settings.discard_button.isEnabled())
+            self.sender.busy = True
+            self.window.refresh_status()
+            self.assertFalse(settings.save_button.isEnabled())
+            self.assertFalse(settings.discard_button.isEnabled())
+            self.sender.busy = False
+            self.window.refresh_status()
+            settings.save_button.click()
             restyle.assert_not_called()
-            self.window.settings.font_size.setCurrentIndex(self.window.settings.font_size.findData(16))
-            self.window.settings.apply_settings()
+            self.assertFalse(settings.save_button.isEnabled())
+            self.assertFalse(settings.discard_button.isEnabled())
+            settings.font_size.setCurrentIndex(settings.font_size.findData(16))
+            settings.save_button.click()
             restyle.assert_called_once()
 
     def test_busy_and_empty_states_disable_only_applicable_actions(self):
@@ -364,7 +377,7 @@ class DesignUITests(unittest.TestCase):
         for focused in (False, True):
             for delta in (-120, 120):
                 with self.subTest(focused=focused, delta=delta):
-                    (box if focused else self.window.settings.save_button).setFocus()
+                    (box if focused else self.window.settings.cooldown).setFocus()
                     scroll.ensureWidgetVisible(box)
                     self.app.processEvents()
                     position = box.mapTo(self.window, box.rect().center())
@@ -421,8 +434,8 @@ class DesignUITests(unittest.TestCase):
         for hint in (self.window.management.team_hint, self.window.management.all_hint):
             self.assertGreaterEqual(hint.contentsRect().width(),
                                     hint.fontMetrics().horizontalAdvance(hint.text()))
-        self.assertGreaterEqual(self.window.management.next_label.height(),
-                                self.window.management.next_label.fontMetrics().lineSpacing() * 3)
+        preview = self.window.management.next_label
+        self.assertGreaterEqual(preview.height(), preview.heightForWidth(preview.width()))
         for button in self.window.management.edit_buttons:
             self.assertTrue(button.parentWidget().rect().contains(button.geometry()))
         self.window.tabs.setCurrentIndex(1)
@@ -464,35 +477,40 @@ class DesignUITests(unittest.TestCase):
         self.window.resize(840, 638)
         self.window.settings.font_size.setCurrentIndex(self.window.settings.font_size.findData(16))
         self.window.settings.apply_settings()
-        self.app.processEvents()
+        QTest.qWait(60)
         preview = self.window.management.next_label
         self.assertEqual(preview.text(), text)
         self.assertGreaterEqual(preview.height(), preview.heightForWidth(preview.width()))
-        scroll = self.window.tabs.widget(0).findChild(QScrollArea)
+        scroll = self.window.management.preview_scroll
         end = preview.mapTo(scroll.widget(), preview.rect().bottomLeft())
         scroll.ensureVisible(end.x(), end.y(), 8, 8)
         self.app.processEvents()
         self.assertGreater(scroll.verticalScrollBar().value(), 0)
         self.assertTrue(scroll.viewport().rect().contains(
             preview.mapTo(scroll.viewport(), preview.rect().bottomLeft())))
+        pause = self.window.management.pause_button
+        self.assertTrue(self.window.management.rect().contains(
+            pause.mapTo(self.window.management, pause.rect().bottomRight())))
+        self.assertGreater(pause.mapTo(self.window.management, pause.rect().topLeft()).y(),
+                           scroll.mapTo(self.window.management, scroll.rect().bottomRight()).y())
         self.messages.advance()
         self.window.refresh_status()
-        self.app.processEvents()
+        QTest.qWait(60)
         self.assertEqual(preview.text(), "下一条短消息")
         self.assertEqual(scroll.verticalScrollBar().value(), 0)
-        self.assertLess(preview.height(), scroll.viewport().height())
+        self.assertEqual(scroll.verticalScrollBar().maximum(), 0)
 
-    def test_four_digit_progress_wraps_instead_of_clipping_at_largest_font(self):
+    def test_four_digit_progress_and_list_numbers_fit_at_largest_font(self):
         self.messages.replace(["测试消息"] * 1000)
         self.messages.index = 999
         self.window.reload_messages(999)
         self.window.resize(840, 638)
         self.window.settings.font_size.setCurrentIndex(self.window.settings.font_size.findData(16))
         self.window.settings.apply_settings()
-        self.app.processEvents()
+        QTest.qWait(60)
         progress = self.window.management.progress_label
         self.assertIn("1000", progress.text())
-        self.assertTrue(progress.sizeHint().width() <= progress.width() or progress.wordWrap())
+        self.assertTrue(progress.parentWidget().rect().contains(progress.geometry()))
         self.assertGreaterEqual(progress.height(), progress.heightForWidth(progress.width()))
 
         delegate = self.window.management.list_widget.itemDelegate()
@@ -509,6 +527,7 @@ class DesignUITests(unittest.TestCase):
         self.assertGreaterEqual(number_rect.width(),
                                 option.fontMetrics.horizontalAdvance("1000"))
         self.assertGreater(text_rect.left(), number_rect.right())
+        self.assertTrue(any(call.args[-1] == "未分类" for call in painter.drawText.call_args_list))
 
 
 if __name__ == "__main__":

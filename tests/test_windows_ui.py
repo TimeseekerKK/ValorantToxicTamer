@@ -333,7 +333,7 @@ class WindowsTests(unittest.TestCase):
                 self.assertTrue(window.isVisible())
                 self.assertEqual(window.management.list_widget.count(), 3)
                 self.assertIn("就绪", window.management.state_label.text())
-                self.assertIn("01", window.management.progress_label.text())
+                self.assertEqual(window.management.progress_label.text(), "第 1 / 3 条")
                 window.management.list_widget.setCurrentRow(1)
                 window.management.move(-1)
                 self.assertEqual(messages.messages[0], "谢谢队友，打得漂亮。")

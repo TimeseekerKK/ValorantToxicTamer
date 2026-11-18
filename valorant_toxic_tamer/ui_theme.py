@@ -2,7 +2,7 @@
 import re
 
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPolygonF
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTabBar, QVBoxLayout, QWidget)
 
@@ -10,6 +10,8 @@ from .tray import MENU_STYLE
 
 
 RED = "#ff4655"
+PRIMARY_RED = "#a9253a"
+PRIMARY_BORDER = "#dc6576"
 TEXT = "#edf2f6"
 MUTED = "#96a4b2"
 STYLE = """
@@ -20,7 +22,7 @@ QLabel#brand { font-size: 18px; font-weight: 700; }
 QLabel#section { font-size: 13px; font-weight: 700; border-left: 3px solid #ff4655; padding-left: 12px; }
 QLabel#muted { color: #96a4b2; }
 QLabel#preview { font-size: 18px; font-weight: 600; }
-QLabel#progress { font-size: 27px; font-weight: 700; }
+QLabel#progress { font-weight: 700; }
 QLabel#ready { color: #68ded2; font-weight: 600; }
 QLabel#keycap { border: 1px solid #536171; padding: 6px 12px; font-weight: 600; }
 QFrame#separator { background: #2b3947; border: 0; max-height: 1px; }
@@ -65,12 +67,12 @@ def paint_button(button):
     primary = bool(button.property("primary"))
     enabled = button.isEnabled()
     hovered = button.underMouse() and enabled
-    top, bottom = ("#ff5663", "#ec3546") if primary else ("#25323f", "#192530")
-    border = "#ff6975" if primary else "#4a5d6e"
+    top, bottom = (PRIMARY_RED, "#891e31") if primary else ("#25323f", "#192530")
+    border = PRIMARY_BORDER if primary else "#4a5d6e"
     if hovered:
-        top, bottom = ("#ff6c78", "#fa4658") if primary else ("#334453", "#233340")
+        top, bottom = ("#ba2e45", "#9c263c") if primary else ("#334453", "#233340")
     if button.isDown():
-        top = bottom = "#cb3041" if primary else "#14202b"
+        top = bottom = "#801b2d" if primary else "#14202b"
     if not enabled:
         top = bottom = "#16212b"
         border = "#2a3845"
@@ -250,8 +252,9 @@ class CutComboBox(QComboBox):
         font = QFont(self.font())
         font.setWeight(QFont.Weight.DemiBold)
         p.setFont(font)
-        p.drawText(QRectF(18, 0, self.width() - 62, self.height()),
-                   Qt.AlignmentFlag.AlignVCenter, self.currentText())
+        text_width = self.width() - 62
+        value = QFontMetrics(font).elidedText(self.currentText(), Qt.TextElideMode.ElideRight, text_width)
+        p.drawText(QRectF(18, 0, text_width, self.height()), Qt.AlignmentFlag.AlignVCenter, value)
         p.setPen(QPen(QColor("#536575"), 1))
         p.drawLine(self.width() - 42, 11, self.width() - 42, self.height() - 11)
         p.setPen(QPen(QColor(RED if active else TEXT), 1.6))
@@ -295,8 +298,8 @@ class CutTabBar(QTabBar):
         for i in range(self.count()):
             rect = QRectF(self.tabRect(i)).adjusted(1, 2, -5, -3)
             active = i == self.currentIndex()
-            p.setPen(QPen(QColor(RED if active else "#344453"), 1))
-            p.setBrush(QColor(RED if active else "#192530"))
+            p.setPen(QPen(QColor(PRIMARY_BORDER if active else "#344453"), 1))
+            p.setBrush(QColor(PRIMARY_RED if active else "#192530"))
             p.drawPath(cut_path(rect, 16))
             p.setPen(QColor(TEXT))
             font = QFont(self.font())

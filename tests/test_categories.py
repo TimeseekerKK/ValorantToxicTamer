@@ -335,17 +335,19 @@ class CategoryUITests(unittest.TestCase):
     def view(self, cid):
         self.window.management.view_category.setCurrentIndex(self.window.management.view_category.findData(cid))
 
+    def move_action(self, cid):
+        return next(action for action in self.window.management.move_category_menu.actions() if action.data() == cid)
+
     def test_assigning_selected_messages_to_current_category_skips_reload(self):
         self.check(self.a)
         self.messages.advance()
         self.view(self.a)
         self.window.management.list_widget.setCurrentRow(0)
         self.window.management.list_widget.item(1).setSelected(True)
-        self.window.management.move_category.setCurrentIndex(self.window.management.move_category.findData(self.a))
         before = self.messages.path.read_bytes()
         with patch.object(self.window.management, "reload_messages") as reload_messages, \
                 patch("valorant_toxic_tamer.message_manager.atomic_json") as save:
-            self.window.management.assign_category()
+            self.move_action(self.a).trigger()
             save.assert_not_called()
             reload_messages.assert_not_called()
         self.assertEqual(self.messages.current, "A2")
@@ -373,7 +375,8 @@ class CategoryUITests(unittest.TestCase):
         self.check(self.b)
         self.check(self.a)
         self.assertEqual(self.messages.selected_categories, [self.b, self.a])
-        self.assertIn("战术 → 鼓励", self.window.management.send_order_label.text())
+        self.assertEqual(self.window.management.send_scope_label.text(), "已选 2 类")
+        self.assertIn("战术 → 鼓励", self.window.management.send_scope_label.toolTip())
         self.check(self.b, False)
         self.check(self.b)
         self.assertEqual(self.messages.selected_categories, [self.a, self.b])
@@ -433,11 +436,12 @@ class CategoryUITests(unittest.TestCase):
     def test_batch_move_uses_visible_selected_rows_and_keeps_text(self):
         self.view(self.a)
         self.window.management.list_widget.item(1).setSelected(True)
-        self.window.management.move_category.setCurrentIndex(self.window.management.move_category.findData(self.b))
-        self.window.management.assign_category()
+        self.move_action(self.b).trigger()
         self.assertEqual(self.messages.rows_for(self.b), [0, 1, 2, 3])
         self.assertEqual(self.messages.messages, ["A1", "A2", "B1", "B2"])
         self.assertEqual(self.window.management.count_label.text(), "0 条")
+        self.view(ALL_CATEGORY)
+        self.assertEqual(self.window.management.list_widget.item(0).data(Qt.ItemDataRole.AccessibleDescriptionRole), "战术")
 
     def test_add_in_view_goes_to_viewed_category(self):
         self.view(self.b)
@@ -531,7 +535,7 @@ class CategoryUITests(unittest.TestCase):
         self.window.show()
         self.app.processEvents()
         for widget in (self.window.management.view_category, self.window.management.manage_categories_button,
-                       self.window.management.move_category, self.window.management.assign_category_button):
+                       self.window.management.assign_category_button):
             self.assertTrue(widget.parentWidget().rect().contains(widget.geometry()))
         self.window.tabs.setCurrentIndex(1)
         self.app.processEvents()
@@ -675,14 +679,15 @@ class CategoryUITests(unittest.TestCase):
             self.window.management.add_message()
         self.assertEqual(self.messages.path.read_bytes(), before)
 
-    def test_assignment_bar_is_hidden_without_selection(self):
-        self.window.management.list_widget.clearSelection()
-        self.window.management.update_actions()
-        self.assertTrue(self.window.management.batch_category_bar.isHidden())
-        self.window.management.list_widget.item(0).setSelected(True)
-        self.window.management.update_actions()
-        self.assertFalse(self.window.management.batch_category_bar.isHidden())
-        self.assertEqual(self.window.management.assign_category_button.text(), "移动")
+    def test_batch_move_menu_requires_selection_and_excludes_the_all_messages_view(self):
+        page = self.window.management
+        page.list_widget.clearSelection()
+        self.assertFalse(page.assign_category_button.isEnabled())
+        page.list_widget.item(0).setSelected(True)
+        self.assertTrue(page.assign_category_button.isEnabled())
+        self.assertEqual(page.assign_category_button.text(), "移动到类别…")
+        self.assertEqual([action.data() for action in page.move_category_menu.actions()],
+                         [UNCATEGORIZED, self.a, self.b])
 
     def test_category_row_actions_are_not_clipped_at_largest_font(self):
         self.config.save({**self.config.value, "font_size": 16})

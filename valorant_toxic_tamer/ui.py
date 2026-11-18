@@ -8,7 +8,7 @@ from .tray import app_icon
 from .update_controller import UpdateController
 from .ui_management import ManagementPage
 from .ui_settings import SettingsPage
-from .ui_theme import RED, CutTabBar, style_for_font_size, style_message_box
+from .ui_theme import CutTabBar, style_for_font_size, style_message_box
 from .ui_widgets import label, separator
 
 
@@ -97,7 +97,7 @@ class MainWindow(QMainWindow):
     def apply_font_size(self):
         self.setStyleSheet(style_for_font_size(self.config.value["font_size"]))
         self.management.next_label.update_height()
-        self.management.progress_label.update_height()
+        self.management.resize_progress()
         self.management.resize_category_list()
         self.management.list_widget.doItemsLayout()
 
@@ -107,10 +107,11 @@ class MainWindow(QMainWindow):
         details = f"队伍：{status['team']}\n全体：{status['all']}"
         for hint, channel in ((self.management.team_hint, "team"), (self.management.all_hint, "all")):
             hint.setToolTip(status[channel])
-        warnings = [f"{'队伍' if channel == 'team' else '全体'}：{value}" for channel, value in status.items()
-                    if "已注册" not in value]
-        self.management.keys_label.setText("\n".join(warnings))
+        warnings = [name for channel, name in (("team", "队伍"), ("all", "全体"))
+                    if "已注册" not in status[channel]]
+        self.management.keys_label.setText(f"{' / '.join(warnings)}快捷键异常" if warnings else "")
         self.management.keys_label.setVisible(bool(warnings))
+        self.management.keys_label.setAccessibleDescription(details)
         self.management.keys_label.setToolTip(details)
 
     def refresh_status(self):
@@ -123,20 +124,25 @@ class MainWindow(QMainWindow):
                      else "就绪" if count else "当前发送范围为空")
             current = current or "暂无消息"
         position = index + 1 if count else 0
-        category = self.messages.category_name(cid) if cid else "未选择有效消息"
-        self.management.state_label.setText(f"● {state}" + (f" · {category}" if count else ""))
+        category = self.messages.category_name(cid) if cid else "发送进度"
+        self.management.state_label.setText(f"● {state}")
         state_style = "color: #e9bd75;" if paused else "color: #68ded2;" if count else "color: #96a4b2;"
         if self.management.state_label.styleSheet() != state_style:
             self.management.state_label.setStyleSheet(state_style)
         self.management.pause_button.setText("继续发送" if paused else "暂停发送")
         self.management.update_send_order()
-        self.management.progress_label.setText(f'<span style="color:{RED}">{position:02d}</span>'
-                                    f' <span style="font-size:{self.config.value["font_size"] + 9}px">/ {count:02d}</span>')
-        if self.management.next_label.text() != current:
+        self.management.active_category_label.set_full_text(category)
+        progress = f"第 {position} / {count} 条" if count else "00 / 00"
+        if self.management.progress_label.text() != progress:
+            self.management.progress_label.setText(progress)
+            self.management.resize_progress()
+        next_index = next_row if count else -1
+        message_changed = self.management.next_label.text() != current
+        if message_changed:
             self.management.next_label.setText(current)
             self.management.next_label.setToolTip(current)
+        if message_changed or self.management.next_index != next_index:
             self.management.preview_scroll.verticalScrollBar().setValue(0)
-        next_index = next_row if count else -1
         if self.management.next_index != next_index:
             self.management.next_index = next_index
             self.management.list_widget.viewport().update()
