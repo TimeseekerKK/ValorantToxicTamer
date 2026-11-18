@@ -47,15 +47,29 @@ class LifecycleTests(unittest.TestCase):
     def test_settings_load_on_first_visit_and_preserve_unsaved_edits(self):
         self.window.show()
         self.assertFalse(self.window.settings_loaded)
-        self.assertFalse(hasattr(self.window, "update_button"))
+        self.assertIsNone(self.window.settings)
         self.window.tabs.setCurrentIndex(1)
         self.assertTrue(self.window.settings_loaded)
-        self.assertEqual(self.window.cooldown.text(), str(self.config.value["cooldown"]))
-        self.window.cooldown.setText("1.8")
+        settings = self.window.settings
+        self.assertIs(self.window.updater.widgets, settings)
+        self.assertTrue(settings.isAncestorOf(settings.update_button))
+        self.assertEqual(self.window.settings.cooldown.text(), str(self.config.value["cooldown"]))
+        self.window.settings.cooldown.setText("1.8")
         self.window.tabs.setCurrentIndex(0)
         self.window.tabs.setCurrentIndex(1)
-        self.assertEqual(self.window.cooldown.text(), "1.8")
-        self.assertIn("未保存", self.window.settings_hint.text())
+        self.assertIs(self.window.settings, settings)
+        self.assertEqual(self.window.settings.cooldown.text(), "1.8")
+        self.assertIn("未保存", self.window.settings.settings_hint.text())
+
+    def test_shutdown_stops_page_timers_without_building_settings(self):
+        page = self.window.management
+        page.search_timer.start()
+        page.list_widget.layout_timer.start()
+        self.window.begin_shutdown()
+        self.assertFalse(page.search_timer.isActive())
+        self.assertFalse(page.list_widget.layout_timer.isActive())
+        self.assertIsNone(self.window.settings)
+        self.assertTrue(self.window.closing)
 
     def test_hidden_window_stops_polling_and_refreshes_latest_state_on_show(self):
         ticks = []
@@ -72,7 +86,7 @@ class LifecycleTests(unittest.TestCase):
         QTest.qWait(150)
         self.assertEqual(len(ticks), count)
         self.window.reveal()
-        self.assertEqual(self.window.next_label.text(), "第二条")
+        self.assertEqual(self.window.management.next_label.text(), "第二条")
         self.assertFalse(self.window.timer.isActive())
 
     def test_polling_only_runs_during_visible_send_or_cooldown(self):
@@ -83,11 +97,11 @@ class LifecycleTests(unittest.TestCase):
         self.sender.ready_at = 11.0
         self.window.report("输入完成")
         self.assertTrue(self.window.timer.isActive())
-        self.assertIn("冷却", self.window.state_label.text())
+        self.assertIn("冷却", self.window.management.state_label.text())
         now[0] = 11.1
         QTest.qWait(150)
         self.assertFalse(self.window.timer.isActive())
-        self.assertIn("就绪", self.window.state_label.text())
+        self.assertIn("就绪", self.window.management.state_label.text())
 
     def test_hotkey_failure_opens_settings_and_hidden_start_can_exit_without_ui(self):
         api = Mock()
@@ -159,7 +173,7 @@ with tempfile.TemporaryDirectory(dir='tests') as directory:
     from PySide6.QtWidgets import QMessageBox
     QMessageBox.exec = lambda self: QMessageBox.StandardButton.No
     for attempt in range(3):
-        controller.window.update_button.click()
+        controller.window.settings.update_button.click()
         deadline = time.monotonic() + 10
         while controller.window.updater.busy and time.monotonic() < deadline:
             app.processEvents()
@@ -202,7 +216,7 @@ print('cold lifecycle passed')
             ticks = []
             with patch("valorant_toxic_tamer.update_process.check_for_update", side_effect=lookup), \
                     patch.object(self.app, "quit") as quit_app:
-                controller.window.update_button.click()
+                controller.window.settings.update_button.click()
                 self.assertTrue(entered.wait(1))
                 began = time.monotonic()
                 controller.quit()

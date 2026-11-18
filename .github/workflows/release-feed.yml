@@ -1,0 +1,45 @@
+name: Publish update feed
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag to verify and repair
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency:
+  group: official-update-feed
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Configure feed commit identity
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+      - name: Verify assets, publish feed and check public contents
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: python -B scripts/publish_update_manifest.py --publish --verify-tag "$RELEASE_TAG" --wait
+      - name: Upload generated manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: update-feed-${{ github.run_id }}
+          path: artifacts/updates/updates.json
+          if-no-files-found: warn

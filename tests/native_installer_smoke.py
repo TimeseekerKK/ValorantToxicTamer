@@ -18,6 +18,7 @@ TEST_GUID = "213401C8-7215-423B-A44B-59BDEDB68F61"
 class NativeInstallerSmoke(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        (ROOT / "artifacts").mkdir(parents=True, exist_ok=True)
         cls.temp = tempfile.TemporaryDirectory(prefix="安装验证 test '&$ ", dir=ROOT / "artifacts")
         cls.root = Path(cls.temp.name).resolve()
         compiler = Path(os.environ.get("INNO_SETUP_COMPILER", ROOT / ".tools/InnoSetup6/ISCC.exe"))

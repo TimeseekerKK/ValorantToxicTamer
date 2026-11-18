@@ -17,7 +17,8 @@ from PySide6.QtWidgets import QApplication, QDialog
 from valorant_toxic_tamer.config_manager import ConfigManager
 from valorant_toxic_tamer.message_manager import MessageManager, prepare_txt_import
 from valorant_toxic_tamer.sender import Sender
-from valorant_toxic_tamer.ui import ImportDialog, MainWindow
+from valorant_toxic_tamer.ui import MainWindow
+from valorant_toxic_tamer.ui_import import ImportDialog
 from valorant_toxic_tamer.ui_theme import MessageDialog
 
 
@@ -58,25 +59,25 @@ class MessageFeatureTests(unittest.TestCase):
     def test_search_preserves_real_rows_index_and_saved_messages(self):
         self.messages.advance()
         before = self.messages.path.read_bytes()
-        self.window.search.setText("ALPHA")
-        self.wait_until(lambda: self.window.list_widget.item(1).isHidden())
-        self.assertFalse(self.window.list_widget.item(2).isHidden())
-        self.assertEqual(self.window.count_label.text(), "2 / 3 条")
-        self.window.list_widget.setCurrentRow(2)
-        self.assertFalse(self.window.up_button.isEnabled())
-        self.assertFalse(self.window.down_button.isEnabled())
+        self.window.management.search.setText("ALPHA")
+        self.wait_until(lambda: self.window.management.list_widget.item(1).isHidden())
+        self.assertFalse(self.window.management.list_widget.item(2).isHidden())
+        self.assertEqual(self.window.management.count_label.text(), "2 / 3 条")
+        self.window.management.list_widget.setCurrentRow(2)
+        self.assertFalse(self.window.management.up_button.isEnabled())
+        self.assertFalse(self.window.management.down_button.isEnabled())
         self.assertEqual(self.messages.index, 1)
         self.assertEqual(self.messages.path.read_bytes(), before)
-        self.assertEqual(self.window.list_widget.currentRow(), 2)
+        self.assertEqual(self.window.management.list_widget.currentRow(), 2)
 
     def test_editing_filtered_result_changes_correct_message(self):
-        self.window.search.setText("Bravo")
-        self.window.filter_messages()
-        self.assertEqual(self.window.list_widget.currentRow(), 1)
+        self.window.management.search.setText("Bravo")
+        self.window.management.filter_messages()
+        self.assertEqual(self.window.management.list_widget.currentRow(), 1)
         QTimer.singleShot(0, lambda: self._finish_edit("已修改 Bravo"))
-        self.window.edit_message()
+        self.window.management.edit_message()
         self.assertEqual(self.messages.messages, ["第一条 Alpha", "已修改 Bravo", "第三条 Alpha"])
-        self.assertEqual(self.window.count_label.text(), "1 / 3 条")
+        self.assertEqual(self.window.management.count_label.text(), "1 / 3 条")
 
     def _finish_edit(self, text):
         dialog = self.app.activeModalWidget()
@@ -86,17 +87,17 @@ class MessageFeatureTests(unittest.TestCase):
     def test_unchanged_edit_preserves_progress_selection_and_list_items(self):
         self.messages.advance()
         self.window.reload_messages(2)
-        item = self.window.list_widget.item(2)
+        item = self.window.management.list_widget.item(2)
         before = self.messages.path.read_bytes()
         with patch.object(MessageDialog, "exec", return_value=QDialog.DialogCode.Accepted), \
-                patch.object(self.window, "reload_messages") as reload_messages, \
+                patch.object(self.window.management, "reload_messages") as reload_messages, \
                 patch("valorant_toxic_tamer.message_manager.atomic_json") as save:
-            self.window.edit_message()
+            self.window.management.edit_message()
             save.assert_not_called()
             reload_messages.assert_not_called()
         self.assertEqual(self.messages.position, 1)
-        self.assertEqual(self.window.list_widget.currentRow(), 2)
-        self.assertIs(self.window.list_widget.item(2), item)
+        self.assertEqual(self.window.management.list_widget.currentRow(), 2)
+        self.assertIs(self.window.management.list_widget.item(2), item)
         self.assertEqual(self.messages.path.read_bytes(), before)
         self.assertIn("未变化", self.window.result_label.text())
 
@@ -114,7 +115,7 @@ class MessageFeatureTests(unittest.TestCase):
                     dialog.input.insert("尾")
                     return QDialog.DialogCode.Accepted
                 with patch.object(MessageDialog, "exec", confirm):
-                    self.window.edit_message()
+                    self.window.management.edit_message()
                 self.assertEqual(self.messages.messages, [text + "尾"])
                 self.assertEqual(MessageManager(self.messages.path).messages, [text + "尾"])
 
@@ -125,20 +126,20 @@ class MessageFeatureTests(unittest.TestCase):
             self.assertEqual(dialog.input.text(), text)
             return QDialog.DialogCode.Accepted
         with patch.object(MessageDialog, "exec", confirm):
-            self.window.add_message()
+            self.window.management.add_message()
         self.assertEqual(MessageManager(self.messages.path).messages[-1], text)
 
     def test_no_results_clears_selection_and_clear_search_restores_all(self):
-        self.window.search.setText("不存在")
-        self.window.filter_messages()
-        self.assertEqual(self.window.message_stack.currentIndex(), 2)
-        self.assertEqual(self.window.list_widget.currentRow(), -1)
-        self.assertFalse(self.window.delete_button.isEnabled())
-        self.window.search.clear()
-        self.window.filter_messages()
-        self.assertEqual(self.window.message_stack.currentIndex(), 0)
-        self.assertEqual(self.window.list_widget.currentRow(), 0)
-        self.assertTrue(all(not self.window.list_widget.item(i).isHidden() for i in range(3)))
+        self.window.management.search.setText("不存在")
+        self.window.management.filter_messages()
+        self.assertEqual(self.window.management.message_stack.currentIndex(), 2)
+        self.assertEqual(self.window.management.list_widget.currentRow(), -1)
+        self.assertFalse(self.window.management.delete_button.isEnabled())
+        self.window.management.search.clear()
+        self.window.management.filter_messages()
+        self.assertEqual(self.window.management.message_stack.currentIndex(), 0)
+        self.assertEqual(self.window.management.list_widget.currentRow(), 0)
+        self.assertTrue(all(not self.window.management.list_widget.item(i).isHidden() for i in range(3)))
 
     def test_preview_counts_existing_and_internal_duplicates_without_writing(self):
         before = self.messages.path.read_bytes()
@@ -189,8 +190,8 @@ class MessageFeatureTests(unittest.TestCase):
         self.assertEqual(self.messages.index, 1)
 
     def _import(self):
-        with patch("valorant_toxic_tamer.ui.QFileDialog.getOpenFileName", return_value=(str(self.source), "")):
-            self.window.import_txt()
+        with patch("valorant_toxic_tamer.ui_management.QFileDialog.getOpenFileName", return_value=(str(self.source), "")):
+            self.window.management.import_txt()
 
     def test_cancel_preview_preserves_file_and_progress(self):
         self.source.write_text("新消息", encoding="utf-8")
@@ -198,7 +199,7 @@ class MessageFeatureTests(unittest.TestCase):
         self.messages.advance()
         with patch.object(ImportDialog, "exec", return_value=QDialog.DialogCode.Rejected):
             self._import()
-            self.wait_until(lambda: self.window.import_worker is None)
+            self.wait_until(lambda: self.window.management.import_worker is None)
         self.assertEqual(self.messages.path.read_bytes(), before)
         self.assertEqual(self.messages.index, 1)
 
@@ -209,7 +210,7 @@ class MessageFeatureTests(unittest.TestCase):
             return QDialog.DialogCode.Accepted
         with patch.object(ImportDialog, "exec", confirm):
             self._import()
-            self.wait_until(lambda: self.window.import_worker is None)
+            self.wait_until(lambda: self.window.management.import_worker is None)
         self.assertEqual(self.messages.messages[-1], "新增")
         self.assertEqual(len(self.messages.messages), 4)
         self.assertEqual(MessageManager(self.messages.path).messages, self.messages.messages)
@@ -222,7 +223,7 @@ class MessageFeatureTests(unittest.TestCase):
             return QDialog.DialogCode.Accepted
         with patch.object(ImportDialog, "exec", confirm):
             self._import()
-            self.wait_until(lambda: self.window.import_worker is None)
+            self.wait_until(lambda: self.window.management.import_worker is None)
         self.sender.busy = False
         self.window.error.assert_called_once()
         self.assertEqual(self.messages.path.read_bytes(), before)
@@ -233,24 +234,24 @@ class MessageFeatureTests(unittest.TestCase):
         self.messages.advance()
         observed = {}
         def confirm(dialog):
-            observed["edit_enabled"] = self.window.edit_button.isEnabled()
-            self.window.list_widget.itemDoubleClicked.emit(self.window.list_widget.item(0))
-            self.window.change(lambda: self.messages.replace(["不应保存"]))
-            self.window.import_txt()
+            observed["edit_enabled"] = self.window.management.edit_button.isEnabled()
+            self.window.management.list_widget.itemDoubleClicked.emit(self.window.management.list_widget.item(0))
+            self.window.management.change(lambda: self.messages.replace(["不应保存"]))
+            self.window.management.import_txt()
             observed["file"] = self.messages.path.read_bytes()
             return QDialog.DialogCode.Rejected
         with patch.object(ImportDialog, "exec", confirm), \
                 patch.object(MessageDialog, "exec") as edit, \
-                patch("valorant_toxic_tamer.ui.QFileDialog.getOpenFileName", return_value=(str(self.source), "")) as choose:
-            self.window.import_txt()
-            self.wait_until(lambda: self.window.import_worker is None)
+                patch("valorant_toxic_tamer.ui_management.QFileDialog.getOpenFileName", return_value=(str(self.source), "")) as choose:
+            self.window.management.import_txt()
+            self.wait_until(lambda: self.window.management.import_worker is None)
             edit.assert_not_called()
             choose.assert_called_once()
         self.assertFalse(observed["edit_enabled"])
         self.assertEqual(observed["file"], before)
         self.assertEqual(self.messages.path.read_bytes(), before)
         self.assertEqual(self.messages.index, 1)
-        self.assertTrue(self.window.edit_button.isEnabled())
+        self.assertTrue(self.window.management.edit_button.isEnabled())
 
     def test_confirm_import_recomputes_duplicates_from_current_messages(self):
         self.source.write_text("新增\n第一条 Alpha\n新增", encoding="utf-8")
@@ -260,7 +261,7 @@ class MessageFeatureTests(unittest.TestCase):
             return QDialog.DialogCode.Accepted
         with patch.object(ImportDialog, "exec", confirm):
             self._import()
-            self.wait_until(lambda: self.window.import_worker is None)
+            self.wait_until(lambda: self.window.management.import_worker is None)
         self.assertEqual(self.messages.messages, ["新增", "其他", "第一条 Alpha"])
 
     def test_confirm_import_with_no_new_messages_preserves_file_and_progress(self):
@@ -274,7 +275,7 @@ class MessageFeatureTests(unittest.TestCase):
             return QDialog.DialogCode.Accepted
         with patch.object(ImportDialog, "exec", confirm):
             self._import()
-            self.wait_until(lambda: self.window.import_worker is None)
+            self.wait_until(lambda: self.window.management.import_worker is None)
         self.assertEqual(self.messages.path.read_bytes(), snapshot["file"])
         self.assertEqual(self.messages.index, 1)
 
@@ -286,7 +287,7 @@ class MessageFeatureTests(unittest.TestCase):
             entered.set()
             unblock.wait(3)
             return original(*args)
-        with patch("valorant_toxic_tamer.ui.prepare_txt_import", side_effect=slow), \
+        with patch("valorant_toxic_tamer.ui_import.prepare_txt_import", side_effect=slow), \
                 patch.object(ImportDialog, "exec") as dialog, \
                 patch.object(MessageDialog, "exec") as edit:
             self._import()
@@ -296,11 +297,11 @@ class MessageFeatureTests(unittest.TestCase):
                 QTimer.singleShot(0, lambda: ticks.append(True))
                 QTest.qWait(20)
                 self.assertTrue(ticks)
-                self.assertFalse(self.window.add_button.isEnabled())
-                self.assertFalse(self.window.import_button.isEnabled())
+                self.assertFalse(self.window.management.add_button.isEnabled())
+                self.assertFalse(self.window.management.import_button.isEnabled())
                 before = self.messages.path.read_bytes()
-                self.window.list_widget.itemDoubleClicked.emit(self.window.list_widget.item(0))
-                self.window.change(lambda: self.messages.replace(["不应保存"]))
+                self.window.management.list_widget.itemDoubleClicked.emit(self.window.management.list_widget.item(0))
+                self.window.management.change(lambda: self.messages.replace(["不应保存"]))
                 edit.assert_not_called()
                 self.assertEqual(self.messages.path.read_bytes(), before)
             finally:

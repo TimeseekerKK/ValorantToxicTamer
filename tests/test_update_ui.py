@@ -56,11 +56,11 @@ class UpdateUITests(unittest.TestCase):
 
     def test_manual_download_page_is_available_after_failed_check(self):
         with patch("valorant_toxic_tamer.update_process.check_for_update", side_effect=OSError("offline")):
-            self.window.update_button.click()
+            self.window.settings.update_button.click()
             self.wait_until(lambda: not self.updater.busy)
         from valorant_toxic_tamer.update_settings import RELEASES_PAGE
-        with patch("valorant_toxic_tamer.ui.QDesktopServices.openUrl", return_value=True) as open_url:
-            self.window.update_download_page.click()
+        with patch("valorant_toxic_tamer.ui_settings.QDesktopServices.openUrl", return_value=True) as open_url:
+            self.window.settings.update_download_page.click()
             self.assertEqual(open_url.call_args.args[0].toString(), RELEASES_PAGE)
 
     def test_no_declines_without_download_or_exit_and_exact_modal(self):
@@ -72,11 +72,11 @@ class UpdateUITests(unittest.TestCase):
         with patch("valorant_toxic_tamer.update_process.check_for_update", return_value=self.release), \
                 patch.object(QMessageBox, "exec", decline), \
                 patch("valorant_toxic_tamer.update_process.download_update") as download:
-            self.window.update_button.click()
+            self.window.settings.update_button.click()
             self.wait_until(lambda: not self.updater.busy)
             download.assert_not_called()
         self.ready.assert_not_called()
-        self.assertTrue(self.window.update_button.isEnabled())
+        self.assertTrue(self.window.settings.update_button.isEnabled())
 
     def test_yes_downloads_then_hands_off_before_exit_signal(self):
         staged = self.directory / "staged.exe"
@@ -87,24 +87,25 @@ class UpdateUITests(unittest.TestCase):
                 patch("valorant_toxic_tamer.update_controller.installed_executable", return_value=target), \
                 patch("valorant_toxic_tamer.update_process.download_update", return_value=staged) as download, \
                 patch("valorant_toxic_tamer.updater.launch_installer") as install:
-            self.window.update_button.click()
+            self.window.settings.update_button.click()
             self.wait_until(lambda: self.ready.called)
             download.assert_called_once_with(self.release, target, self.updater.cancel,
-                                             progress=self.updater.download_progress.emit)
+                                             progress=self.updater.download_progress.emit,
+                                             phase=self.updater.download_phase.emit)
             install.assert_called_once_with(staged, target)
         self.ready.assert_called_once()
 
     def test_latest_version_and_check_failure_restore_button(self):
         with patch("valorant_toxic_tamer.update_process.check_for_update", return_value=None), \
                 patch.object(self.window, "information") as info:
-            self.window.update_button.click()
+            self.window.settings.update_button.click()
             self.wait_until(lambda: not self.updater.busy)
             info.assert_called_once()
         with patch("valorant_toxic_tamer.update_process.check_for_update", side_effect=OSError("offline")):
-            self.window.update_button.click()
+            self.window.settings.update_button.click()
             self.wait_until(lambda: not self.updater.busy)
             self.window.error.assert_called_once_with("offline")
-        self.assertTrue(self.window.update_button.isEnabled())
+        self.assertTrue(self.window.settings.update_button.isEnabled())
         self.ready.assert_not_called()
 
     def test_lazy_import_failure_is_reported_and_can_retry(self):
@@ -117,13 +118,13 @@ class UpdateUITests(unittest.TestCase):
             return original_import(name, globals, locals, fromlist, level)
 
         with patch("builtins.__import__", side_effect=fail_update_import):
-            self.window.update_button.click()
+            self.window.settings.update_button.click()
             self.wait_until(lambda: not self.updater.busy)
         self.window.error.assert_called_once_with("update dependency unavailable")
-        self.assertTrue(self.window.update_button.isEnabled())
+        self.assertTrue(self.window.settings.update_button.isEnabled())
         with patch("valorant_toxic_tamer.update_process.check_for_update", return_value=None), \
                 patch.object(self.window, "information") as info:
-            self.window.update_button.click()
+            self.window.settings.update_button.click()
             self.wait_until(lambda: not self.updater.busy)
             info.assert_called_once()
 
@@ -138,7 +139,7 @@ class UpdateUITests(unittest.TestCase):
                     patch("valorant_toxic_tamer.update_process.download_update", side_effect=OSError("failed") if stage == "download" else None,
                           return_value=staged), \
                     patch("valorant_toxic_tamer.updater.launch_installer", side_effect=OSError("failed")) as install:
-                self.window.update_button.click()
+                self.window.settings.update_button.click()
                 self.wait_until(lambda: not self.updater.busy)
                 self.window.error.assert_called_once_with("failed")
                 if stage == "download":
@@ -150,16 +151,16 @@ class UpdateUITests(unittest.TestCase):
     def test_certificate_failure_restores_button_and_allows_retry(self):
         with patch("valorant_toxic_tamer.update_process.check_for_update", side_effect=ValueError("HTTPS 证书校验失败")), \
                 patch("valorant_toxic_tamer.update_process.download_update") as download:
-            self.window.update_button.click()
+            self.window.settings.update_button.click()
             self.wait_until(lambda: not self.updater.busy)
             self.assertIn("HTTPS 证书校验失败", self.window.error.call_args.args[0])
             self.assertIn("暂时无法确认最新版本", self.window.result_label.text())
-            self.assertTrue(self.window.update_button.isEnabled())
+            self.assertTrue(self.window.settings.update_button.isEnabled())
             download.assert_not_called()
         self.ready.assert_not_called()
         with patch("valorant_toxic_tamer.update_process.check_for_update", return_value=None), \
                 patch.object(self.window, "information") as info:
-            self.window.update_button.click()
+            self.window.settings.update_button.click()
             self.wait_until(lambda: not self.updater.busy)
             info.assert_called_once()
 
@@ -171,18 +172,18 @@ class UpdateUITests(unittest.TestCase):
             return None
         with patch("valorant_toxic_tamer.update_process.check_for_update", side_effect=lookup) as lookup_mock, \
                 patch.object(self.window, "information"):
-            self.window.update_button.click()
+            self.window.settings.update_button.click()
             self.wait_until(lambda: lookup_mock.call_count == 1)
-            self.assertFalse(self.window.update_button.isEnabled())
-            self.assertFalse(self.window.update_channel.isEnabled())
-            self.assertTrue(self.window.update_button.animation.isActive())
+            self.assertFalse(self.window.settings.update_button.isEnabled())
+            self.assertFalse(self.window.settings.update_channel.isEnabled())
+            self.assertTrue(self.window.settings.update_button.animation.isActive())
             self.updater.check()
             self.assertEqual(lookup_mock.call_count, 1)
             self.assertTrue(self.updater.busy)
             unblock.set()
             self.wait_until(lambda: not self.updater.busy)
-            self.assertTrue(self.window.update_channel.isEnabled())
-            self.assertFalse(self.window.update_button.animation.isActive())
+            self.assertTrue(self.window.settings.update_channel.isEnabled())
+            self.assertFalse(self.window.settings.update_button.animation.isActive())
 
     def test_shutdown_cancels_pending_check_without_displaying_an_error(self):
         entered = threading.Event()
@@ -191,7 +192,7 @@ class UpdateUITests(unittest.TestCase):
             cancel.wait(3)
             raise ValueError("检查更新已取消。")
         with patch("valorant_toxic_tamer.update_process.check_for_update", side_effect=lookup):
-            self.window.update_button.click()
+            self.window.settings.update_button.click()
             self.assertTrue(entered.wait(1))
             self.updater.shutdown()
             self.wait_until(lambda: self.updater.worker is None)
@@ -201,20 +202,20 @@ class UpdateUITests(unittest.TestCase):
     def test_channel_is_saved_immediately_without_changing_application_config(self):
         before = self.window.config.path.read_bytes()
         self.assertEqual(self.updater.channel, "stable")
-        self.window.update_channel.setCurrentIndex(self.window.update_channel.findData("beta"))
+        self.window.settings.update_channel.setCurrentIndex(self.window.settings.update_channel.findData("beta"))
         self.assertEqual(self.updater.channel, "beta")
         self.assertEqual(self.window.config.path.read_bytes(), before)
         import json
         self.assertEqual(json.loads(self.updater.preferences_path.read_text()), {"channel": "beta"})
         with patch("valorant_toxic_tamer.update_process.check_for_update", return_value=None) as lookup, \
                 patch.object(self.window, "information"):
-            self.window.update_button.click()
+            self.window.settings.update_button.click()
             self.wait_until(lambda: not self.updater.busy)
             lookup.assert_called_once_with(channel="beta", cancel=self.updater.cancel)
         restarted = MainWindow(self.window.messages, self.window.config, self.sender, Mock())
         try:
             restarted.tabs.setCurrentIndex(1)
-            self.assertEqual(restarted.update_channel.currentData(), "beta")
+            self.assertEqual(restarted.settings.update_channel.currentData(), "beta")
         finally:
             restarted.updater.shutdown()
             restarted.timer.stop()
@@ -225,7 +226,7 @@ class UpdateUITests(unittest.TestCase):
         staged.write_bytes(b"MZnew")
         entered = threading.Event()
 
-        def download(release, target, cancel, *, progress):
+        def download(release, target, cancel, *, progress, phase):
             progress(2, 5)
             entered.set()
             cancel.wait(3)
@@ -237,23 +238,23 @@ class UpdateUITests(unittest.TestCase):
                 patch("valorant_toxic_tamer.update_controller.installed_executable", return_value=self.directory / "installed.exe"), \
                 patch("valorant_toxic_tamer.update_process.download_update", side_effect=download), \
                 patch("valorant_toxic_tamer.updater.launch_installer") as install:
-            self.window.update_button.click()
+            self.window.settings.update_button.click()
             self.wait_until(entered.is_set)
-            self.wait_until(lambda: self.window.update_progress.value() == 400)
-            self.assertIn("40.0%", self.window.update_progress.format())
-            self.assertFalse(self.window.cancel_update_button.isHidden())
-            self.window.cancel_update_button.click()
+            self.wait_until(lambda: self.window.settings.update_progress.value() == 400)
+            self.assertIn("40.0%", self.window.settings.update_progress.format())
+            self.assertFalse(self.window.settings.cancel_update_button.isHidden())
+            self.window.settings.cancel_update_button.click()
             self.wait_until(lambda: not self.updater.busy)
             self.assertFalse(staged.exists())
             self.assertEqual(self.window.result_label.text(), "已取消更新。")
-            self.assertTrue(self.window.update_progress.isHidden())
-            self.assertTrue(self.window.cancel_update_button.isHidden())
+            self.assertTrue(self.window.settings.update_progress.isHidden())
+            self.assertTrue(self.window.settings.cancel_update_button.isHidden())
             install.assert_not_called()
             self.ready.assert_not_called()
             self.window.error.assert_not_called()
         with patch("valorant_toxic_tamer.update_process.check_for_update", return_value=None), \
                 patch.object(self.window, "information"):
-            self.window.update_button.click()
+            self.window.settings.update_button.click()
             self.wait_until(lambda: not self.updater.busy)
             self.assertFalse(self.updater.cancel.is_set())
 
@@ -264,19 +265,34 @@ class UpdateUITests(unittest.TestCase):
 
         with patch("valorant_toxic_tamer.update_process.check_for_update", side_effect=lookup), \
                 patch.object(QMessageBox, "exec") as prompt:
-            self.window.update_button.click()
-            self.window.cancel_update_button.click()
+            self.window.settings.update_button.click()
+            self.window.settings.cancel_update_button.click()
             self.wait_until(lambda: not self.updater.busy)
             prompt.assert_not_called()
             self.window.error.assert_not_called()
-            self.assertTrue(self.window.update_channel.isEnabled())
+            self.assertTrue(self.window.settings.update_channel.isEnabled())
+
+    def test_verify_and_retry_phases_are_visible_and_stale_updates_are_ignored(self):
+        self.updater.stage = "download"
+        self.updater._phase("verify")
+        self.updater._progress(5, 5)
+        self.assertIn("校验", self.window.settings.update_progress.format())
+        self.assertEqual(self.window.settings.update_button.text(), "校验中…")
+        self.updater._phase("retry")
+        self.assertIn("重试", self.window.settings.update_progress.format())
+        self.updater._phase("download")
+        self.updater._progress(1, 5)
+        self.assertIn("20.0%", self.window.settings.update_progress.format())
+        self.updater.cancel.set()
+        self.updater._phase("verify")
+        self.assertEqual(self.window.settings.update_button.text(), "下载中…")
 
     def test_channel_save_failure_restores_previous_choice(self):
         before = self.updater.preferences_path.read_bytes()
         with patch("valorant_toxic_tamer.update_controller.atomic_json", side_effect=OSError("disk full")):
-            self.window.update_channel.setCurrentIndex(self.window.update_channel.findData("beta"))
+            self.window.settings.update_channel.setCurrentIndex(self.window.settings.update_channel.findData("beta"))
         self.assertEqual(self.updater.channel, "stable")
-        self.assertEqual(self.window.update_channel.currentData(), "stable")
+        self.assertEqual(self.window.settings.update_channel.currentData(), "stable")
         self.assertEqual(self.updater.preferences_path.read_bytes(), before)
         self.window.error.assert_called_once()
 
@@ -292,7 +308,7 @@ class UpdateUITests(unittest.TestCase):
         with patch("valorant_toxic_tamer.update_process.check_for_update", return_value=release), \
                 patch.object(QMessageBox, "exec", decline), \
                 patch("valorant_toxic_tamer.update_process.download_update") as download:
-            self.window.update_button.click()
+            self.window.settings.update_button.click()
             self.wait_until(lambda: not self.updater.busy)
             download.assert_not_called()
         self.ready.assert_not_called()

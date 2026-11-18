@@ -4,6 +4,7 @@ from copy import deepcopy
 import os
 import unicodedata
 from uuid import uuid4
+from bisect import bisect_left
 
 from .config_manager import atomic_json, load_json
 
@@ -73,10 +74,22 @@ class ImportPreview:
         return len(self.messages) - len(self.unique_messages)
 
 
-def prepare_txt_import(path: Path, existing=()) -> ImportPreview:
+def prepare_txt_import(path: Path, existing=(), cancel=None) -> ImportPreview:
     """Read and validate without touching application data; safe in a worker."""
+    def check():
+        if cancel is not None and cancel.is_set():
+            raise ValueError("导入已取消。")
+    check()
+    chunks, size = [], 0
     with path.open("rb") as stream:
-        raw = stream.read(MAX_IMPORT_BYTES + 1)
+        while size <= MAX_IMPORT_BYTES:
+            check()
+            chunk = stream.read(min(65536, MAX_IMPORT_BYTES + 1 - size))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+    raw = b"".join(chunks)
     if len(raw) > MAX_IMPORT_BYTES:
         raise ValueError("TXT 文件不能超过 8 MiB，请拆分后导入。")
     try:
@@ -88,7 +101,10 @@ def prepare_txt_import(path: Path, existing=()) -> ImportPreview:
         raise ValueError("TXT 文件中没有非空消息")
     if len(lines) > MAX_IMPORT_LINES:
         raise ValueError("单次最多导入 20000 条消息，请拆分后导入。")
-    validate_messages(list(lines))
+    for offset in range(0, len(lines), 128):
+        check()
+        validate_messages(list(lines[offset:offset + 128]))
+    check()
     return ImportPreview(lines, deduplicate_messages(lines, existing))
 
 
@@ -125,6 +141,10 @@ class MessageManager:
         self.mode = "sequential"
         self._positions = {}
         self._active_category = None
+        self._keys = list(range(len(value["messages"])))
+        self._next_key = len(self._keys)
+        self.revision = 0
+        self.last_change = ("reset", ())
         self._rebuild()
 
     @staticmethod
@@ -133,12 +153,42 @@ class MessageManager:
 
     def _rebuild(self):
         self._messages = [m["text"] for m in self._library["messages"]]
-        self._rows = {c["id"]: [] for c in self.categories}
+        self._names = {c["id"]: c["name"] for c in self._library["categories"]}
+        self._rows = {cid: [] for cid in self._names}
         self._rows[ALL_CATEGORY] = list(range(len(self._messages)))
         for row, entry in enumerate(self._library["messages"]):
             self._rows[entry["category"]].append(row)
         self._positions = {cid: self._positions.get(cid, 0) % max(1, len(rows))
                            for cid, rows in self._rows.items()}
+
+    @property
+    def count(self):
+        return len(self._messages)
+
+    def text_at(self, row):
+        return self._messages[row]
+
+    def key_at(self, row):
+        return self._keys[row]
+
+    def iter_messages(self):
+        return zip(self._keys, self._messages)
+
+    def category_count(self, cid):
+        return len(self._rows[cid])
+
+    def category_offset(self, cid, row):
+        rows = self._rows[cid]
+        offset = bisect_left(rows, row)
+        return offset if offset < len(rows) and rows[offset] == row else -1
+
+    def current_state(self):
+        cid = self.current_category
+        if cid is None:
+            return None, 0, 0, None, None
+        position = self._positions[cid]
+        row = self._rows[cid][position]
+        return cid, len(self._rows[cid]), position, row, self._messages[row]
 
     @property
     def messages(self):
@@ -155,7 +205,7 @@ class MessageManager:
     def category_name(self, cid):
         if cid == ALL_CATEGORY:
             return "全部消息"
-        return next(c["name"] for c in self.categories if c["id"] == cid)
+        return self._names[cid]
 
     def rows_for(self, cid):
         if cid not in self._rows:
@@ -167,7 +217,7 @@ class MessageManager:
 
     @property
     def current_category(self):
-        candidates = [cid for cid in self.selected_categories if self._rows[cid]]
+        candidates = [cid for cid in self._library["selected_categories"] if self._rows[cid]]
         return (self._active_category if self._active_category in candidates
                 else candidates[0] if candidates else None)
 
@@ -220,11 +270,13 @@ class MessageManager:
             self.mode = mode
             self._active_category = None
 
-    def _commit(self, library, reset=(), *, selection_changed=False):
+    def _commit(self, library, reset=(), *, selection_changed=False, rebuild=True,
+                keys=None, change=("reset", ())):
+        # Public operations validate their changed values before constructing a
+        # copy-on-write candidate. Full validation remains mandatory on load.
         # An unchanged library must not migrate legacy data or reset progress.
         if library == self._library:
             return False
-        validate_library(library)
         if self._legacy:
             # Keep the exact old file before the first successful format migration.
             backup = self.path.with_name(f"{self.path.stem}.legacy-{uuid4().hex}.json")
@@ -239,71 +291,107 @@ class MessageManager:
         atomic_json(self.path, library)
         self._legacy = False
         self._library = library
+        if keys is not None:
+            self._keys = keys
+        self.revision += 1
+        self.last_change = change
         for cid in reset:
             self._positions[cid] = 0
         if selection_changed:
             self._active_category = None
-        self._rebuild()
+        if rebuild:
+            self._rebuild()
+        else:
+            if change[0] == "edit":
+                for row in change[1]:
+                    self._messages[row] = library["messages"][row]["text"]
+            self._names = {c["id"]: c["name"] for c in library["categories"]}
+            for cid in self._names:
+                self._rows.setdefault(cid, [])
+                self._positions.setdefault(cid, 0)
         return True
 
     def select_categories(self, categories):
-        library = deepcopy(self._library)
-        library["selected_categories"] = list(categories)
-        return self._commit(library, selection_changed=True)
+        categories = list(categories)
+        if (any(not isinstance(cid, str) for cid in categories)
+                or len(categories) != len(set(categories))
+                or any(cid not in self._rows for cid in categories)
+                or (ALL_CATEGORY in categories and len(categories) != 1)):
+            raise ValueError("发送类别无效；全部消息不能与其他类别同时选择")
+        library = {**self._library, "selected_categories": categories}
+        return self._commit(library, selection_changed=True, rebuild=False, change=("metadata", ()))
+
+    def _category_name(self, name, excluding=None):
+        name = name.strip()
+        validate_category_name(name)
+        if name.casefold() == "全部消息" or any(
+                cid != excluding and old.casefold() == name.casefold() for cid, old in self._names.items()):
+            raise ValueError("类别标识或名称重复")
+        return name
 
     def create_category(self, name):
         cid = uuid4().hex
-        library = deepcopy(self._library)
-        library["categories"].append({"id": cid, "name": name.strip()})
-        self._commit(library)
+        name = self._category_name(name)
+        library = {**self._library, "categories": self._library["categories"] + [{"id": cid, "name": name}]}
+        self._commit(library, rebuild=False, change=("metadata", ()))
         return cid
 
     def rename_category(self, cid, name):
         if cid in (ALL_CATEGORY, UNCATEGORIZED) or cid not in self._rows:
             raise ValueError("内置类别不能重命名")
-        name = name.strip()
+        name = self._category_name(name, cid)
         if name == self.category_name(cid):
             return False
-        library = deepcopy(self._library)
-        next(c for c in library["categories"] if c["id"] == cid)["name"] = name
-        return self._commit(library)
+        library = {**self._library, "categories": [
+            {**c, "name": name} if c["id"] == cid else c for c in self._library["categories"]]}
+        return self._commit(library, rebuild=False, change=("metadata", ()))
 
     def delete_category(self, cid):
         if cid in (ALL_CATEGORY, UNCATEGORIZED) or cid not in self._rows:
             raise ValueError("内置类别不能删除")
-        library = deepcopy(self._library)
+        library = self._library.copy()
         library["categories"] = [c for c in library["categories"] if c["id"] != cid]
-        for entry in library["messages"]:
-            if entry["category"] == cid:
-                entry["category"] = UNCATEGORIZED
+        library["messages"] = [{**entry, "category": UNCATEGORIZED} if entry["category"] == cid else entry
+                               for entry in self._library["messages"]]
         library["selected_categories"] = [c for c in self.selected_categories if c != cid]
-        return self._commit(library, (UNCATEGORIZED,), selection_changed=True)
+        return self._commit(library, (UNCATEGORIZED,), selection_changed=True, change=("metadata", ()))
 
-    def _edit_entries(self, entries, affected):
-        library = deepcopy(self._library)
-        library["messages"] = entries
-        return self._commit(library, set(affected) | {ALL_CATEGORY})
+    def _edit_entries(self, entries, affected, *, keys=None, change=("reset", ())):
+        library = {**self._library, "messages": entries}
+        return self._commit(library, set(affected) | {ALL_CATEGORY}, keys=keys, change=change,
+                            rebuild=change[0] != "edit")
+
+    def _new_keys(self, count):
+        keys = list(range(self._next_key, self._next_key + count))
+        self._next_key += count
+        return keys
 
     def append(self, messages, category=UNCATEGORIZED):
         messages = list(messages)
         validate_messages(messages)
         if category == ALL_CATEGORY:
             category = UNCATEGORIZED
-        return self._edit_entries(deepcopy(self._library["messages"]) + [self._entry(t, category) for t in messages],
-                                  (category,))
+        if category not in self._rows:
+            raise ValueError("类别不存在")
+        return self._edit_entries(self._library["messages"] + [self._entry(t, category) for t in messages],
+                                  (category,), keys=self._keys + self._new_keys(len(messages)),
+                                  change=("append", (self.count,)))
 
     def edit_message(self, row, text):
         if self._messages[row] == text:
             return False
-        entries = deepcopy(self._library["messages"])
-        entries[row]["text"] = text
-        return self._edit_entries(entries, (entries[row]["category"],))
+        validate_messages([text])
+        entries = self._library["messages"].copy()
+        entries[row] = {**entries[row], "text": text}
+        return self._edit_entries(entries, (entries[row]["category"],), change=("edit", (row,)))
 
     def delete_messages(self, rows):
         rows = set(rows)
         entries = self._library["messages"]
-        return self._edit_entries([deepcopy(e) for i, e in enumerate(entries) if i not in rows],
-                                  {e["category"] for i, e in enumerate(entries) if i in rows})
+        return self._edit_entries([e for i, e in enumerate(entries) if i not in rows],
+                                  {e["category"] for i, e in enumerate(entries) if i in rows},
+                                  keys=[key for i, key in enumerate(self._keys) if i not in rows],
+                                  change=("delete", tuple(sorted(rows))))
 
     def move_to_category(self, rows, category):
         if category == ALL_CATEGORY or category not in self._rows:
@@ -311,22 +399,25 @@ class MessageManager:
         rows = [row for row in rows if self.category_for(row) != category]
         if not rows:
             return False
-        entries = deepcopy(self._library["messages"])
+        entries = self._library["messages"].copy()
         affected = {category}
         for row in rows:
             affected.add(entries[row]["category"])
-            entries[row]["category"] = category
-        return self._edit_entries(entries, affected)
+            entries[row] = {**entries[row], "category": category}
+        return self._edit_entries(entries, affected, change=("metadata", ()))
 
     def swap(self, row, target):
-        entries = deepcopy(self._library["messages"])
+        entries = self._library["messages"].copy()
         affected = {entries[row]["category"], entries[target]["category"]}
         entries[row], entries[target] = entries[target], entries[row]
-        return self._edit_entries(entries, affected)
+        keys = self._keys.copy()
+        keys[row], keys[target] = keys[target], keys[row]
+        return self._edit_entries(entries, affected, keys=keys, change=("swap", (row, target)))
 
     def replace(self, messages):
         validate_messages(messages)
-        return self._edit_entries([self._entry(t, UNCATEGORIZED) for t in messages], self._rows)
+        return self._edit_entries([self._entry(t, UNCATEGORIZED) for t in messages], self._rows,
+                                  keys=self._new_keys(len(messages)))
 
     def import_txt(self, path: Path):
         preview = prepare_txt_import(path, self.messages)

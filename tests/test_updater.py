@@ -234,7 +234,8 @@ class UpdaterTests(unittest.TestCase):
         staged.write_bytes(self.content)
         helper = self.directory / "helper"
         helper.mkdir()
-        process = Mock()
+        import os
+        process = Mock(pid=os.getpid())
         def spawn(*args, **kwargs):
             (helper / "ready").touch()
             return process

@@ -67,6 +67,28 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(self.api.events, [(13, True), (13, False), "你", "好", (13, True), (13, False)])
         self.assertEqual(self.messages.index, 1)
 
+    def test_pause_blocks_both_channels_then_resumes_at_same_message(self):
+        self.sender.set_paused(True)
+        for channel in ("team", "all"):
+            self.assertFalse(self.send(channel))
+        self.assertEqual(self.api.events, [])
+        self.assertEqual(self.messages.index, 0)
+        self.sender.set_paused(False)
+        self.assertTrue(self.send("team"))
+        self.assertEqual(self.messages.index, 1)
+
+    def test_pause_rejects_mid_input_change_and_preserves_cooldown(self):
+        self.sender.ready_at = 10.5
+        self.sender.busy = True
+        with self.assertRaises(ValueError):
+            self.sender.set_paused(True)
+        self.assertFalse(self.sender.paused)
+        self.sender.busy = False
+        self.sender.set_paused(True)
+        self.sender.set_paused(False)
+        self.assertFalse(self.send("team"))
+        self.assertEqual(self.sender.ready_at, 10.5)
+
     def test_all_shift_released_before_text_and_final_enter(self):
         self.send("all")
         self.assertEqual(self.api.events, [(16, True), (13, True), (13, False), (16, False),

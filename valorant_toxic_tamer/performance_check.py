@@ -38,7 +38,7 @@ def process_memory():
 
 
 def run(report_path, started):
-    from PySide6.QtCore import qVersion
+    from PySide6.QtCore import qVersion, Qt
     from PySide6.QtWidgets import QApplication
     from PySide6.QtGui import QFontDatabase, QFontInfo
     from . import app as application
@@ -90,6 +90,7 @@ def run(report_path, started):
         app.processEvents()
         sample("window_open", began)
         window = controller.window
+        management = getattr(window, "management", window)
         result["font_family"] = QFontInfo(window.font()).family()
         try:
             began = time.perf_counter()
@@ -103,12 +104,12 @@ def run(report_path, started):
             app.processEvents()
             sample("load_5000", began)
             began = time.perf_counter()
-            window.search.setText("00499")
-            window.filter_messages()
+            management.search.setText("00499")
+            management.filter_messages()
             app.processEvents()
             sample("search_5000", began)
-            window.search.clear()
-            window.filter_messages()
+            management.search.clear()
+            management.filter_messages()
             source = Path(directory) / "import.txt"
             source.write_text("\n".join(f"导入消息 {i}" for i in range(1000)), encoding="utf-8")
             began = time.perf_counter()
@@ -119,6 +120,27 @@ def run(report_path, started):
             window.reload_messages()
             app.processEvents()
             sample("apply_import_1000", began)
+            # The same public operations can probe both the reference commit
+            # and the candidate with an identical harness and temporary data.
+            for count in (5000, 20000):
+                controller.messages.replace([f"性能消息 {i:05d}，保持配合。" for i in range(count)])
+                controller.messages.select_categories(["all"])
+                window.reload_messages()
+                app.processEvents()
+                began = time.perf_counter()
+                management.send_categories.item(0).setCheckState(Qt.CheckState.Unchecked)
+                app.processEvents()
+                sample(f"select_{count}", began)
+                began = time.perf_counter()
+                controller.messages.edit_message(count // 2, "已修改的性能消息，保持配合。")
+                window.reload_messages(count // 2)
+                app.processEvents()
+                sample(f"edit_{count}", began)
+                began = time.perf_counter()
+                controller.messages.edit_message(0, "长消息：" + "注意配合，等待队友。" * 80)
+                window.reload_messages(0)
+                app.processEvents()
+                sample(f"long_edit_{count}", began)
             window.information = lambda *args: None
             errors = []
             window.error = errors.append
@@ -141,6 +163,24 @@ def run(report_path, started):
                     sample(f"update_check_{attempt}", began)
             finally:
                 update_process.worker_command = original_command
+            # Accelerate only the isolated probe's idle grace period. Compare
+            # these stages on the same runner before/after UI memory changes.
+            if hasattr(window, "background_timer"):
+                window.background_timer.setInterval(20)
+            began = time.perf_counter()
+            window.close()
+            deadline = time.monotonic() + 0.1
+            while time.monotonic() < deadline:
+                app.processEvents()
+                time.sleep(0.005)
+            sample("window_hidden", began)
+            metrics["window_hidden.rendered_items"] = management.list_widget.count()
+            began = time.perf_counter()
+            window.reveal()
+            app.processEvents()
+            sample("window_restored", began)
+            if management.list_widget.count() != len(controller.messages.messages):
+                raise RuntimeError("Hidden-window message list did not restore")
             result["tls_not_loaded_in_gui"] = all(name not in sys.modules for name in (
                 "ssl", "truststore", "valorant_toxic_tamer.updater"))
         finally:

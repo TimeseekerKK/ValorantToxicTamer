@@ -17,13 +17,18 @@ def check(path):
     if "valorant_toxic_tamer/assets/app.ico" not in {name.replace("\\", "/") for name in archive.toc}:
         raise RuntimeError("打包缺少窗口和系统托盘所需的 app.ico。")
     modules = archive.open_embedded_archive("PYZ.pyz").toc
+    ui_modules = {f"valorant_toxic_tamer.{name}" for name in
+                  ("ui", "ui_management", "ui_settings", "ui_categories", "ui_import", "ui_widgets")}
+    if not ui_modules.issubset(modules):
+        raise RuntimeError("打包缺少界面页面、对话框或列表绘制模块。")
     if "valorant_toxic_tamer.elevation" not in modules:
         raise RuntimeError("打包缺少启动时请求管理员权限所需的 elevation 模块。")
     if "valorant_toxic_tamer.data_migration" not in modules:
         raise RuntimeError("打包缺少个人数据迁移模块。")
     if not {"valorant_toxic_tamer.entrypoint", "valorant_toxic_tamer.update_process",
             "valorant_toxic_tamer.update_protocol", "valorant_toxic_tamer.update_manifest",
-            "valorant_toxic_tamer.update_settings", "valorant_toxic_tamer.updater"}.issubset(modules):
+            "valorant_toxic_tamer.update_settings", "valorant_toxic_tamer.updater",
+            "valorant_toxic_tamer.import_process", "valorant_toxic_tamer.update_files"}.issubset(modules):
         raise RuntimeError("打包缺少独立检查更新进程所需的模块。")
     if not {"truststore", "truststore._api", "truststore._windows"}.issubset(modules):
         raise RuntimeError("打包缺少 Windows 原生 HTTPS 证书验证所需的 truststore。")
