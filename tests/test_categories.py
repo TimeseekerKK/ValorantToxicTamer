@@ -271,6 +271,57 @@ class CategoryTests(unittest.TestCase):
         self.messages.export_txt(path, self.b)
         self.assertEqual(path.read_text(encoding="utf-8-sig"), "B1\nB2\n")
 
+    def test_backup_round_trip_keeps_empty_categories_message_order_and_send_selection(self):
+        self.messages.append(["A1"], self.a)
+        self.messages.append(["无归属"])
+        self.messages.swap(0, 4)
+        self.messages.select_categories([self.b, self.empty, self.a])
+        path = self.root / "backup.json"
+        self.messages.export_backup(path)
+        saved = self.messages.read_backup(path)
+        self.messages.rename_category(self.a, "新名称")
+        self.messages.delete_category(self.b)
+        self.messages.append(["新消息"], self.a)
+        self.messages.advance()
+        before = self.messages.path.read_bytes()
+
+        archive = self.messages.restore_backup(saved)
+
+        self.assertEqual(before, archive.read_bytes())
+        self.assertEqual(self.messages.read_backup(self.messages.path), saved)
+        self.assertEqual(self.messages.categories, saved["categories"])
+        self.assertEqual(self.messages.selected_categories, [self.b, self.empty, self.a])
+        self.assertEqual(self.take(3), ["B2", "B1", "A2"])
+        self.assertIsNone(self.messages.restore_backup(saved))
+        self.assertEqual(list(self.root.glob("*.before-restore-*.json")), [archive])
+        saved["messages"].clear()
+        self.assertEqual(self.messages.count, 7)
+
+    def test_invalid_backup_and_failed_writes_preserve_current_library(self):
+        self.messages.advance()
+        path = self.root / "backup.json"
+        path.write_text('["早期消息"]', encoding="utf-8")
+        library = self.messages.read_backup(path)
+        path.write_text('{"version":99}', encoding="utf-8")
+        before = self.messages.path.read_bytes()
+        revision = self.messages.revision
+        with self.assertRaises(ValueError):
+            self.messages.read_backup(path)
+        with patch("valorant_toxic_tamer.message_manager.os.fsync", side_effect=OSError("backup failed")):
+            with self.assertRaisesRegex(OSError, "backup failed"):
+                self.messages.restore_backup(library)
+        self.assertEqual(list(self.root.glob("*.before-restore-*.json")), [])
+        with patch("valorant_toxic_tamer.message_manager.atomic_json", side_effect=OSError("disk full")):
+            with self.assertRaisesRegex(OSError, "disk full"):
+                self.messages.restore_backup(library)
+        self.assertEqual(self.messages.path.read_bytes(), before)
+        self.assertEqual(self.messages.revision, revision)
+        self.assertEqual(self.messages.current, "A2")
+        self.messages.restore_backup(library)
+        self.assertEqual(self.messages.messages, ["早期消息"])
+        self.assertEqual(self.messages.category_for(0), UNCATEGORIZED)
+        self.assertEqual(self.messages.selected_categories, [ALL_CATEGORY])
+
     def test_channels_share_category_schedule_and_failed_input_does_not_advance(self):
         self.messages.select_categories([self.b, self.a])
         self.messages.set_mode("alternating")
@@ -459,6 +510,42 @@ class CategoryUITests(unittest.TestCase):
             self.window.management.clear_messages()
         self.assertEqual(self.messages.messages, ["A1", "A2"])
         self.assertEqual(self.messages.rows_for(self.a), [0, 1])
+
+    def test_backup_actions_work_in_empty_view_and_restore_reordered_categories(self):
+        page = self.window.management
+        empty = self.messages.create_category("空列表")
+        self.messages.select_categories([self.b, self.a])
+        page.reload_messages()
+        page.view_category.setCurrentIndex(page.view_category.findData(empty))
+        self.assertTrue(page.more_button.isEnabled())
+        path = self.root / "backup.json"
+        with patch("valorant_toxic_tamer.ui_management.QFileDialog.getSaveFileName",
+                   return_value=(str(path), "")):
+            page.backup_action.trigger()
+        library = self.messages.read_backup(path)
+        self.assertEqual(len(library["messages"]), 4)
+        uncategorized, first, second, _ = library["categories"]
+        library["categories"] = [uncategorized, second, first]
+        library["messages"].pop()
+        atomic_json(path, library)
+        before_config = self.config.path.read_bytes()
+        with patch("valorant_toxic_tamer.ui_management.QFileDialog.getOpenFileName",
+                   return_value=(str(path), "")):
+            with patch.object(QMessageBox, "exec", return_value=QMessageBox.StandardButton.No):
+                page.restore_action.trigger()
+            self.assertEqual(self.messages.count, 4)
+            self.assertEqual(list(self.root.glob("*.before-restore-*.json")), [])
+            with patch.object(QMessageBox, "exec", return_value=QMessageBox.StandardButton.Yes):
+                page.restore_action.trigger()
+        self.window.error.assert_not_called()
+        self.assertEqual(self.messages.count, 3)
+        self.assertEqual(page.list_widget.count(), 3)
+        self.assertEqual(page.view_category.currentData(), ALL_CATEGORY)
+        items = [page.send_categories.item(row) for row in range(page.send_categories.count())]
+        self.assertEqual([item.data(Qt.ItemDataRole.UserRole) for item in items],
+                         [ALL_CATEGORY, UNCATEGORIZED, self.b, self.a])
+        self.assertEqual([item.data(CategoryOrderDelegate.ORDER_ROLE) for item in items], [None, None, 1, 2])
+        self.assertEqual(self.config.path.read_bytes(), before_config)
 
     def test_reorder_in_category_skips_other_categories(self):
         self.messages.swap(1, 2)

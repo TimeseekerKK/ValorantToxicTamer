@@ -1,6 +1,7 @@
 from pathlib import Path
 from dataclasses import dataclass
 from copy import deepcopy
+import json
 import os
 import unicodedata
 from uuid import uuid4
@@ -24,6 +25,14 @@ def validate_category_name(name):
 def empty_library():
     return {"version": 2, "categories": [{"id": UNCATEGORIZED, "name": "未分类"}],
             "messages": [], "selected_categories": [ALL_CATEGORY]}
+
+
+def upgrade_library(value):
+    if isinstance(value, list):
+        library = empty_library()
+        library["messages"] = [{"text": text, "category": UNCATEGORIZED} for text in value]
+        return library
+    return value
 
 
 def validate_library(value):
@@ -133,10 +142,7 @@ class MessageManager:
         self.path = path
         value = load_json(path, empty_library(), validate_library)
         self._legacy = isinstance(value, list)
-        if self._legacy:
-            library = empty_library()
-            library["messages"] = [self._entry(text, UNCATEGORIZED) for text in value]
-            value = library
+        value = upgrade_library(value)
         self._library = value
         self.mode = "sequential"
         self._positions = {}
@@ -271,22 +277,26 @@ class MessageManager:
             self._active_category = None
 
     def _commit(self, library, reset=(), *, selection_changed=False, rebuild=True,
-                keys=None, change=("reset", ())):
+                keys=None, change=("reset", ()), backup_path=None):
         # Public operations validate their changed values before constructing a
         # copy-on-write candidate. Full validation remains mandatory on load.
         # An unchanged library must not migrate legacy data or reset progress.
         if library == self._library:
             return False
-        if self._legacy:
-            # Keep the exact old file before the first successful format migration.
-            backup = self.path.with_name(f"{self.path.stem}.legacy-{uuid4().hex}.json")
+        if self._legacy and backup_path is None:
+            backup_path = self.path.with_name(f"{self.path.stem}.legacy-{uuid4().hex}.json")
+        if backup_path is not None:
+            original = self.path.read_bytes()
+            created = False
             try:
-                with backup.open("xb") as stream:
-                    stream.write(self.path.read_bytes())
+                with backup_path.open("xb") as stream:
+                    created = True
+                    stream.write(original)
                     stream.flush()
                     os.fsync(stream.fileno())
             except OSError:
-                backup.unlink(missing_ok=True)
+                if created:
+                    backup_path.unlink(missing_ok=True)
                 raise
         atomic_json(self.path, library)
         self._legacy = False
@@ -422,6 +432,29 @@ class MessageManager:
     def import_txt(self, path: Path):
         preview = prepare_txt_import(path, self.messages)
         return self.append(preview.messages)
+
+    def export_backup(self, path: Path):
+        atomic_json(path, self._library)
+
+    @staticmethod
+    def read_backup(path: Path):
+        value = json.loads(path.read_text(encoding="utf-8-sig"))
+        validate_library(value)
+        return upgrade_library(value)
+
+    def restore_backup(self, library):
+        validate_library(library)
+        library = upgrade_library(library)
+        if library == self._library:
+            return None
+        backup_path = self.path.with_name(f"{self.path.stem}.before-restore-{uuid4().hex}.json")
+        # Copy the validated snapshot so the caller cannot mutate the live library.
+        library = deepcopy(library)
+        next_key = self._next_key + len(library["messages"])
+        keys = list(range(self._next_key, next_key))
+        self._commit(library, self._rows, selection_changed=True, keys=keys, backup_path=backup_path)
+        self._next_key = next_key
+        return backup_path
 
     def export_txt(self, path: Path, category=ALL_CATEGORY):
         messages = [self._messages[row] for row in self.rows_for(category)]

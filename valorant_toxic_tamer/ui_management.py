@@ -1,4 +1,4 @@
-"""Message-management page: editing, filtering, category selection and TXT I/O.
+"""Message-management page: editing, filtering, category selection and file I/O.
 
 The page owns its controls, incremental list state and import worker. Shared
 services and window-level notifications are accessed explicitly through host.
@@ -200,6 +200,11 @@ class ManagementPage(QWidget):
         self.export_action = self.more_menu.addAction("导出 TXT")
         self.export_action.triggered.connect(self.export_txt)
         self.more_menu.addSeparator()
+        self.backup_action = self.more_menu.addAction("备份消息库…")
+        self.backup_action.triggered.connect(self.export_backup)
+        self.restore_action = self.more_menu.addAction("恢复消息库…")
+        self.restore_action.triggered.connect(self.restore_backup)
+        self.more_menu.addSeparator()
         self.clear_action = self.more_menu.addAction("清空全部消息…")
         self.clear_action.triggered.connect(self.clear_messages)
         self.more_button.setMenu(self.more_menu)
@@ -274,12 +279,15 @@ class ManagementPage(QWidget):
                 for row in reversed(range(self.send_categories.count())):
                     if self.send_categories.item(row).data(Qt.ItemDataRole.UserRole) not in wanted:
                         self.send_categories.takeItem(row)
-                for category in categories:
-                    if category["id"] not in existing:
+                for row, category in enumerate(categories):
+                    item = existing.get(category["id"])
+                    if item is None:
                         item = QListWidgetItem()
                         item.setData(Qt.ItemDataRole.UserRole, category["id"])
                         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                        self.send_categories.addItem(item)
+                        self.send_categories.insertItem(row, item)
+                    elif (current_row := self.send_categories.row(item)) != row:
+                        self.send_categories.insertItem(row, self.send_categories.takeItem(current_row))
             orders = {cid: order for order, cid in enumerate(selected, 1)}
             for row, category in enumerate(categories):
                 cid = category["id"]
@@ -383,7 +391,7 @@ class ManagementPage(QWidget):
         self.down_button.setEnabled(idle and selected and 0 <= offset < category_count - 1 and not filtered)
         self.reorder_hint.setVisible(filtered)
         self.export_action.setEnabled(idle and bool(category_count))
-        self.more_button.setEnabled(idle and bool(category_count))
+        self.more_button.setEnabled(idle)
         self.pause_button.setEnabled(idle)
         importing = self.import_worker is not None and self.import_worker.isRunning()
         self.cancel_import_button.setVisible(importing)
@@ -641,7 +649,7 @@ class ManagementPage(QWidget):
         dialog.setWindowTitle("清空消息列表")
         dialog.setText(f"确定删除列表中的全部 {count} 条消息？" if cid == ALL_CATEGORY
                        else f"确定清空“{self.host.messages.category_name(cid)}”中的全部 {count} 条消息？")
-        dialog.setInformativeText("清空后会自动保存，无法撤销。如需保留，请先取消并导出 TXT 备份。")
+        dialog.setInformativeText("清空后会自动保存，无法直接撤销。如需保留，请先取消并备份消息库。")
         dialog.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         dialog.button(QMessageBox.StandardButton.Yes).setText("清空列表")
         dialog.button(QMessageBox.StandardButton.No).setText("取消")
@@ -738,3 +746,59 @@ class ManagementPage(QWidget):
                 self.host.result_label.setText(f"已导出到 {path}")
             except (OSError, ValueError) as exc:
                 self.host.error(exc)
+
+    def export_backup(self):
+        if not self.can_edit():
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "备份消息库", "messages-backup.json", "JSON 文件 (*.json)")
+        if not path or self.host.closing:
+            return
+        try:
+            destination = Path(path)
+            resolved = destination.resolve()
+            data_files = (self.host.messages.path, self.host.config.path, self.host.updater.preferences_path)
+            if any(resolved == file.resolve() for file in data_files):
+                raise ValueError("请选择其他文件名，避免覆盖程序的本地数据文件。")
+            self.host.messages.export_backup(destination)
+            self.host.result_label.setText(f"消息库已备份到 {destination}")
+        except (OSError, ValueError, RuntimeError) as exc:
+            self.host.error(exc)
+
+    def restore_backup(self):
+        if not self.can_edit():
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "恢复消息库", "", "JSON 文件 (*.json)")
+        if not path or self.host.closing:
+            return
+        try:
+            library = self.host.messages.read_backup(Path(path))
+        except (OSError, ValueError, RecursionError) as exc:
+            self.host.error(f"无法读取消息库备份。\n{exc}")
+            return
+
+        categories = len(library["categories"]) - 1
+        messages = len(library["messages"])
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("恢复消息库")
+        dialog.setText(f"用备份中的 {categories} 个自建类别和 {messages} 条消息覆盖当前消息库？")
+        dialog.setInformativeText("发送类别的勾选和顺序也会恢复。覆盖前会在本地数据文件夹保留当前消息库的备份。")
+        dialog.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        dialog.button(QMessageBox.StandardButton.Yes).setText("覆盖并恢复")
+        dialog.button(QMessageBox.StandardButton.No).setText("取消")
+        dialog.setDefaultButton(QMessageBox.StandardButton.No)
+        dialog.setEscapeButton(QMessageBox.StandardButton.No)
+        style_message_box(dialog, QMessageBox.StandardButton.Yes)
+        answer = dialog.exec()
+        dialog.deleteLater()
+        if answer != QMessageBox.StandardButton.Yes or self.host.closing or self.import_worker is not None:
+            return
+        try:
+            backup = self.host.sender.edit(lambda: self.host.messages.restore_backup(library))
+        except (OSError, ValueError) as exc:
+            self.host.error(f"恢复失败。\n{exc}")
+            return
+        if backup is None:
+            self.host.result_label.setText("备份与当前消息库一致，无需恢复。")
+            return
+        self.reload_messages()
+        self.host.result_label.setText("消息库已恢复，发送进度已重置。恢复前的备份已保存到本地数据文件夹。")
