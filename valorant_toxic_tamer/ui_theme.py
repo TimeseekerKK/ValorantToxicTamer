@@ -21,6 +21,7 @@ QLabel { background: transparent; }
 QLabel#brand { font-size: 18px; font-weight: 700; }
 QLabel#section { font-size: 13px; font-weight: 700; border-left: 3px solid #ff4655; padding-left: 12px; }
 QLabel#muted { color: #96a4b2; }
+QLabel#error { color: #ff8290; }
 QLabel#preview { font-size: 18px; font-weight: 600; }
 QLabel#progress { font-weight: 700; }
 QLabel#ready { color: #68ded2; font-weight: 600; }

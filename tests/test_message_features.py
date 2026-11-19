@@ -12,10 +12,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QFontDatabase
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtWidgets import QApplication, QDialog, QLabel
 
 from valorant_toxic_tamer.config_manager import ConfigManager
-from valorant_toxic_tamer.message_manager import MessageManager, prepare_txt_import
+from valorant_toxic_tamer.message_manager import ALL_CATEGORY, UNCATEGORIZED, MessageManager, prepare_txt_import
 from valorant_toxic_tamer.sender import Sender
 from valorant_toxic_tamer.ui import MainWindow
 from valorant_toxic_tamer.ui_import import ImportDialog
@@ -135,11 +135,28 @@ class MessageFeatureTests(unittest.TestCase):
         self.assertEqual(self.window.management.message_stack.currentIndex(), 2)
         self.assertEqual(self.window.management.list_widget.currentRow(), -1)
         self.assertFalse(self.window.management.delete_button.isEnabled())
-        self.window.management.search.clear()
-        self.window.management.filter_messages()
+        self.assertTrue(self.window.management.search_all_button.isHidden())
+        self.window.management.clear_search_button.click()
         self.assertEqual(self.window.management.message_stack.currentIndex(), 0)
         self.assertEqual(self.window.management.list_widget.currentRow(), 0)
         self.assertTrue(all(not self.window.management.list_widget.item(i).isHidden() for i in range(3)))
+
+    def test_expand_empty_category_search_preserves_keyword_and_send_scope(self):
+        cid = self.messages.create_category("空类别")
+        self.messages.select_categories([UNCATEGORIZED])
+        page = self.window.management
+        page.reload_messages()
+        page.view_category.setCurrentIndex(page.view_category.findData(cid))
+        page.search.setText("Bravo")
+        page.filter_messages()
+        self.assertEqual(page.message_stack.currentIndex(), 2)
+        self.assertIn("空类别", page.no_matches.text())
+        page.search_all_button.click()
+        self.assertEqual(page.view_category.currentData(), ALL_CATEGORY)
+        self.assertEqual(page.search.text(), "Bravo")
+        self.assertEqual(page.list_widget.currentRow(), 1)
+        self.assertEqual(self.messages.selected_categories, [UNCATEGORIZED])
+        self.assertEqual(self.messages.index, 0)
 
     def test_preview_counts_existing_and_internal_duplicates_without_writing(self):
         before = self.messages.path.read_bytes()
@@ -149,15 +166,21 @@ class MessageFeatureTests(unittest.TestCase):
         self.assertEqual(preview.unique_messages, ("新增", "另一条"))
         self.assertEqual(len(preview.messages), 4)
         self.assertEqual(self.messages.path.read_bytes(), before)
-        dialog = ImportDialog(self.window, preview)
+        dialog = ImportDialog(self.window, preview, self.messages.categories, UNCATEGORIZED)
         self.assertEqual(len(dialog.selected_messages()), 4)
+        self.assertEqual([badge.text() for badge, _ in dialog.preview_status],
+                         ["重复 · 将保留", "将追加", "重复 · 将保留", "将追加"])
         dialog.skip_duplicates.setChecked(True)
         self.assertEqual(dialog.selected_messages(), ("新增", "另一条"))
+        self.assertEqual([badge.text() for badge, _ in dialog.preview_status],
+                         ["重复 · 已跳过", "将追加", "重复 · 已跳过", "将追加"])
+        self.assertEqual(dialog.confirm.text(), "追加 2 条")
         dialog.deleteLater()
 
     def test_all_duplicate_preview_prevents_empty_import(self):
         self.source.write_text("第一条 Alpha\n第一条 Alpha", encoding="utf-8")
-        dialog = ImportDialog(self.window, prepare_txt_import(self.source, self.messages.messages))
+        dialog = ImportDialog(self.window, prepare_txt_import(self.source, self.messages.messages),
+                              self.messages.categories, UNCATEGORIZED)
         dialog.skip_duplicates.setChecked(True)
         self.assertFalse(dialog.confirm.isEnabled())
         dialog.deleteLater()
@@ -166,10 +189,11 @@ class MessageFeatureTests(unittest.TestCase):
         self.config.save({**self.config.value, "font_size": 16})
         self.window.apply_font_size()
         self.source.write_text("\n".join(["长消息内容" * 40] * 5), encoding="utf-8")
-        dialog = ImportDialog(self.window, prepare_txt_import(self.source))
+        dialog = ImportDialog(self.window, prepare_txt_import(self.source),
+                              self.messages.categories, UNCATEGORIZED)
         dialog.show()
         self.app.processEvents()
-        self.assertIn("5. ", dialog.preview_text.text())
+        self.assertTrue(any(line.text().startswith("5. ") for line in dialog.preview_scroll.findChildren(QLabel)))
         self.assertGreater(dialog.preview_scroll.verticalScrollBar().maximum(), 0)
         self.assertTrue(dialog.rect().contains(dialog.confirm.geometry()))
         self.assertLessEqual(dialog.height(), self.app.primaryScreen().availableGeometry().height())
@@ -204,8 +228,12 @@ class MessageFeatureTests(unittest.TestCase):
         self.assertEqual(self.messages.index, 1)
 
     def test_confirm_preview_deduplicates_and_persists_once(self):
+        destination = self.messages.create_category("导入目标")
+        self.window.management.reload_messages()
         self.source.write_text("第一条 Alpha\n新增\n新增", encoding="utf-8")
         def confirm(dialog):
+            self.assertEqual(dialog.destination.currentData(), UNCATEGORIZED)
+            dialog.destination.setCurrentIndex(dialog.destination.findData(destination))
             dialog.skip_duplicates.setChecked(True)
             return QDialog.DialogCode.Accepted
         with patch.object(ImportDialog, "exec", confirm):
@@ -213,7 +241,9 @@ class MessageFeatureTests(unittest.TestCase):
             self.wait_until(lambda: self.window.management.import_worker is None)
         self.assertEqual(self.messages.messages[-1], "新增")
         self.assertEqual(len(self.messages.messages), 4)
-        self.assertEqual(MessageManager(self.messages.path).messages, self.messages.messages)
+        saved = MessageManager(self.messages.path)
+        self.assertEqual(saved.messages, self.messages.messages)
+        self.assertEqual(saved.category_for(3), destination)
 
     def test_import_rechecks_sender_after_preview(self):
         self.source.write_text("新消息", encoding="utf-8")

@@ -178,9 +178,22 @@ class ManagementPage(QWidget):
                                alignment=Qt.AlignmentFlag.AlignHCenter)
         empty_layout.addStretch()
         self.message_stack.addWidget(empty)
-        self.no_matches = label("没有匹配的消息，试试其他关键词。", "muted", True)
+        no_results = QWidget()
+        no_results_layout = QVBoxLayout(no_results)
+        no_results_layout.addStretch()
+        self.no_matches = label("", "progress", True)
         self.no_matches.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.message_stack.addWidget(self.no_matches)
+        no_results_layout.addWidget(self.no_matches)
+        search_actions = QHBoxLayout()
+        search_actions.addStretch()
+        self.clear_search_button = self.button("清除关键词", self.clear_search)
+        self.search_all_button = self.button("搜索全部类别", self.search_all, primary=True)
+        search_actions.addWidget(self.clear_search_button)
+        search_actions.addWidget(self.search_all_button)
+        search_actions.addStretch()
+        no_results_layout.addLayout(search_actions)
+        no_results_layout.addStretch()
+        self.message_stack.addWidget(no_results)
         manage_layout.addWidget(self.message_stack, 1)
         manage_layout.addWidget(separator())
         buttons = QHBoxLayout()
@@ -399,6 +412,7 @@ class ManagementPage(QWidget):
         self.assign_category_button.setEnabled(idle and bool(rows))
         self.selection_label.setText(f"已选 {len(rows)} 条")
         self.view_category.setEnabled(idle)
+        self.search_all_button.setEnabled(idle)
         self.send_categories.setEnabled(idle)
         self.manage_categories_button.setEnabled(idle)
         self.clear_action.setText("清空全部消息…" if cid == ALL_CATEGORY
@@ -542,6 +556,15 @@ class ManagementPage(QWidget):
         self.host.refresh_status()
         self.list_widget.viewport().update()
 
+    def clear_search(self):
+        self.search.clear()
+        self.filter_messages()
+        self.search.setFocus()
+
+    def search_all(self):
+        self.view_category.setCurrentIndex(self.view_category.findData(ALL_CATEGORY))
+        self.search.setFocus()
+
     def filter_messages(self):
         self.search_timer.stop()
         if self._suspended_state is not None:
@@ -569,7 +592,11 @@ class ManagementPage(QWidget):
             self.list_widget.setUpdatesEnabled(True)
         count = len(category_rows)
         self.count_label.setText(f"{len(visible)} / {count} 条" if query else f"{count} 条")
-        self.message_stack.setCurrentIndex(1 if not count else 0 if visible else 2)
+        if query and not visible:
+            scope = self.host.messages.category_name(cid)
+            self.no_matches.setText(f"在「{scope}」中找不到匹配消息。")
+            self.search_all_button.setVisible(cid != ALL_CATEGORY)
+        self.message_stack.setCurrentIndex(0 if visible else 2 if query else 1)
         self.update_actions()
 
     def change(self, action, row=None):
@@ -703,13 +730,11 @@ class ManagementPage(QWidget):
                 self.host.result_label.setText("导入未完成，现有消息未更改。")
                 return
             # Keep the import guard until the modal preview has closed too.
-            dialog = ImportDialog(self, worker.preview)
-            cid = self.import_category
-            destination = UNCATEGORIZED if cid == ALL_CATEGORY else cid
-            dialog.setWindowTitle(f"导入预览 · {self.host.messages.category_name(destination)}")
-            dialog.destination_label.setText(f"目标类别：{self.host.messages.category_name(destination)}")
-            dialog.destination_label.show()
+            preview = worker.preview
+            destination = UNCATEGORIZED if self.import_category == ALL_CATEGORY else self.import_category
+            dialog = ImportDialog(self, preview, self.host.messages.categories, destination)
             accepted = dialog.exec() == QDialog.DialogCode.Accepted
+            destination = dialog.destination.currentData()
             skip_duplicates = dialog.skip_duplicates.isChecked()
             dialog.deleteLater()
         finally:
@@ -721,16 +746,17 @@ class ManagementPage(QWidget):
                 def append():
                     # Recompute inside the same edit lock as persistence, using
                     # all input lines rather than the preview's old unique subset.
-                    incoming = (deduplicate_messages(worker.preview.messages, self.host.messages.messages)
-                                if skip_duplicates else worker.preview.messages)
+                    incoming = (deduplicate_messages(preview.messages, self.host.messages.messages)
+                                if skip_duplicates else preview.messages)
                     if not incoming:
                         return False
-                    self.host.messages.append(incoming, self.import_category)
+                    self.host.messages.append(incoming, destination)
                     return True
                 row = self.host.messages.count
                 if self.host.sender.edit(append):
                     self.reload_messages(row)
-                    self.host.result_label.setText("导入已保存，目标类别和全部消息的发送进度已重置。")
+                    name = self.host.messages.category_name(destination)
+                    self.host.result_label.setText(f"已追加到「{name}」，该类别和全部消息的发送进度已重置。")
                 else:
                     self.host.result_label.setText("没有需要追加的新消息，现有消息和发送进度未更改。")
             except (OSError, ValueError) as exc:
@@ -776,21 +802,13 @@ class ManagementPage(QWidget):
             self.host.error(f"无法读取消息库备份。\n{exc}")
             return
 
-        categories = len(library["categories"]) - 1
-        messages = len(library["messages"])
-        dialog = QMessageBox(self)
-        dialog.setWindowTitle("恢复消息库")
-        dialog.setText(f"用备份中的 {categories} 个自建类别和 {messages} 条消息覆盖当前消息库？")
-        dialog.setInformativeText("发送类别的勾选和顺序也会恢复。覆盖前会在本地数据文件夹保留当前消息库的备份。")
-        dialog.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        dialog.button(QMessageBox.StandardButton.Yes).setText("覆盖并恢复")
-        dialog.button(QMessageBox.StandardButton.No).setText("取消")
-        dialog.setDefaultButton(QMessageBox.StandardButton.No)
-        dialog.setEscapeButton(QMessageBox.StandardButton.No)
-        style_message_box(dialog, QMessageBox.StandardButton.Yes)
+        current = self.host.messages
+        dialog = RestoreBackupDialog(self, Path(path).name,
+                                     (len(current.categories) - 1, current.count),
+                                     (len(library["categories"]) - 1, len(library["messages"])))
         answer = dialog.exec()
         dialog.deleteLater()
-        if answer != QMessageBox.StandardButton.Yes or self.host.closing or self.import_worker is not None:
+        if answer != QDialog.DialogCode.Accepted or self.host.closing or self.import_worker is not None:
             return
         try:
             backup = self.host.sender.edit(lambda: self.host.messages.restore_backup(library))
@@ -802,3 +820,44 @@ class ManagementPage(QWidget):
             return
         self.reload_messages()
         self.host.result_label.setText("消息库已恢复，发送进度已重置。恢复前的备份已保存到本地数据文件夹。")
+
+
+class RestoreBackupDialog(QDialog):
+    def __init__(self, parent, filename, current, incoming):
+        super().__init__(parent)
+        self.setWindowTitle("恢复消息库")
+        self.setWindowIcon(parent.windowIcon())
+        self.setMinimumWidth(500)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setSpacing(12)
+        layout.addWidget(label("恢复消息库", "section"))
+        source = ElidingLabel("muted")
+        source.set_full_text(f"备份文件  {filename}")
+        layout.addWidget(source)
+        comparison = QHBoxLayout()
+        for heading, (categories, messages) in (("当前消息库", current), ("恢复后", incoming)):
+            panel = Panel()
+            values = QVBoxLayout(panel)
+            values.setContentsMargins(13, 11, 13, 11)
+            values.addWidget(label(heading, "muted"))
+            values.addWidget(label(f"{categories} 个自建类别 · {messages} 条", "progress", True))
+            comparison.addWidget(panel, 1)
+            if heading == "当前消息库":
+                comparison.addWidget(label("→", "muted"))
+        layout.addLayout(comparison)
+        warning = label("当前消息库将被覆盖，发送类别的勾选和顺序也会恢复。", wrap=True)
+        warning.setStyleSheet("color: #e9bd75;")
+        layout.addWidget(warning)
+        layout.addWidget(label("覆盖前会自动备份当前消息库到本地数据文件夹。", "muted", True))
+        actions = QHBoxLayout()
+        actions.addStretch()
+        cancel = CutButton("取消")
+        cancel.setDefault(True)
+        cancel.clicked.connect(self.reject)
+        confirm = CutButton("覆盖并恢复", primary=True)
+        confirm.clicked.connect(self.accept)
+        actions.addWidget(cancel)
+        actions.addWidget(confirm)
+        layout.addLayout(actions)
+        cancel.setFocus()

@@ -1,5 +1,5 @@
 """Lazily constructed settings page and its validation/save workflow."""
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QApplication, QFormLayout, QHBoxLayout, QLabel, QProgressBar,
                                QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
@@ -21,6 +21,7 @@ class SettingsPage(QWidget):
         outer.setContentsMargins(0, 8, 0, 0)
         outer.setSpacing(8)
         scroll = QScrollArea()
+        self.form_scroll = scroll
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         body = QWidget()
@@ -50,11 +51,17 @@ class SettingsPage(QWidget):
         self.cooldown.setMinimumWidth(130)
         self.cooldown.setAccessibleName("共用发送冷却（秒）")
         self.cooldown.setPlaceholderText("例如 0.8")
-        for title, control in (("队伍聊天快捷键", self.team_key),
-                               ("全体聊天快捷键", self.all_key), ("共用发送冷却", self.cooldown)):
+        self.hotkey_error = label("两个频道不能使用同一个快捷键。", "error", True)
+        self.cooldown_error = label("请输入 0.2–2 秒之间的数字。", "error", True)
+        for title, control, error in (("队伍聊天快捷键", self.team_key, None),
+                                      ("全体聊天快捷键", self.all_key, self.hotkey_error),
+                                      ("共用发送冷却", self.cooldown, self.cooldown_error)):
             caption = label(title)
             caption.setBuddy(control)
             form.addRow(caption, control)
+            if error is not None:
+                error.hide()
+                form.addRow("", error)
         self.category_mode = CutComboBox(wheel_changes=False)
         self.category_mode.setAccessibleName("多类别发送方式")
         for mode, title in CATEGORY_MODES.items():
@@ -83,9 +90,7 @@ class SettingsPage(QWidget):
         controls.addWidget(self.autostart)
         controls.addWidget(label("关闭窗口后仍在托盘运行；完全退出请使用托盘菜单。", "muted", True))
         self.error_label = label("", "error", True)
-        self.error_label.setStyleSheet("color: #ff8290;")
         self.error_label.hide()
-        controls.addWidget(self.error_label)
         controls.addStretch()
         columns.addWidget(left, 3)
 
@@ -155,6 +160,7 @@ class SettingsPage(QWidget):
         columns.addWidget(right, 2)
         scroll.setWidget(body)
         outer.addWidget(scroll, 1)
+        outer.addWidget(self.error_label)
         footer = QHBoxLayout()
         self.settings_hint = label("修改后点击「保存设置」生效", "muted", True)
         footer.addWidget(self.settings_hint, 1)
@@ -208,18 +214,39 @@ class SettingsPage(QWidget):
         self.settings_hint.setStyleSheet("color: #e9bd75;" if changed else "")
         self.update_save_actions(self.host.management.can_edit())
         self.error_label.hide()
+        if self.team_key.currentText() != self.all_key.currentText():
+            self.hotkey_error.hide()
+            self.all_key.setAccessibleDescription("")
+        if cooldown is not None and 0.2 <= cooldown <= 2:
+            self.cooldown_error.hide()
+            self.cooldown.setAccessibleDescription("")
 
     def update_save_actions(self, idle):
         enabled = idle and self.has_changes
         self.save_button.setEnabled(enabled)
         self.discard_button.setEnabled(enabled)
 
+    def show_field_error(self, control, error):
+        self.error_label.hide()
+        error.show()
+        control.setAccessibleDescription(error.text())
+        control.setFocus()
+        QTimer.singleShot(0, self, lambda: self.form_scroll.ensureWidgetVisible(
+            error, 0, control.height() + 8))
+
     def apply_settings(self):
+        if self.team_key.currentText() == self.all_key.currentText():
+            self.show_field_error(self.all_key, self.hotkey_error)
+            return
         try:
-            try:
-                cooldown = float(self.cooldown.text().strip())
-            except ValueError:
-                raise ValueError("请输入有效的冷却时间（0.2–2 秒）。") from None
+            cooldown = float(self.cooldown.text().strip())
+        except ValueError:
+            cooldown = None
+        if cooldown is None or not 0.2 <= cooldown <= 2:
+            self.show_field_error(self.cooldown, self.cooldown_error)
+            self.cooldown.selectAll()
+            return
+        try:
             value = dict(team_hotkey=self.team_key.currentText(), all_hotkey=self.all_key.currentText(),
                          cooldown=cooldown, start_hidden=self.start_hidden.isChecked(),
                          autostart=self.autostart.isChecked(), font_size=self.font_size.currentData(),

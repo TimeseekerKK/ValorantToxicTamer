@@ -10,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QScrollArea, QPushButton
+from PySide6.QtWidgets import QApplication, QDialog, QLabel, QMessageBox, QScrollArea, QPushButton
 
 from valorant_toxic_tamer.config_manager import ConfigManager, DEFAULT_CONFIG, atomic_json
 from valorant_toxic_tamer.message_manager import ALL_CATEGORY, UNCATEGORIZED, MessageManager
@@ -18,6 +18,7 @@ from valorant_toxic_tamer.sender import Sender
 from valorant_toxic_tamer.ui import MainWindow
 from valorant_toxic_tamer.ui_categories import CategoryManagerDialog
 from valorant_toxic_tamer.ui_import import ImportDialog
+from valorant_toxic_tamer.ui_management import RestoreBackupDialog
 from valorant_toxic_tamer.ui_widgets import CategoryOrderDelegate
 from valorant_toxic_tamer.ui_theme import MessageDialog
 from test_core import FakeAPI
@@ -529,13 +530,22 @@ class CategoryUITests(unittest.TestCase):
         library["messages"].pop()
         atomic_json(path, library)
         before_config = self.config.path.read_bytes()
+        def check_preview(dialog):
+            widgets = dialog.findChildren(QLabel)
+            labels = [widget.text() for widget in widgets]
+            self.assertTrue(any(path.name in widget.accessibleName() for widget in widgets))
+            self.assertIn("3 个自建类别 · 4 条", labels)
+            self.assertIn("2 个自建类别 · 3 条", labels)
+            cancel = next(button for button in dialog.findChildren(QPushButton) if button.text() == "取消")
+            self.assertTrue(cancel.isDefault())
+            return QDialog.DialogCode.Rejected
         with patch("valorant_toxic_tamer.ui_management.QFileDialog.getOpenFileName",
                    return_value=(str(path), "")):
-            with patch.object(QMessageBox, "exec", return_value=QMessageBox.StandardButton.No):
+            with patch.object(RestoreBackupDialog, "exec", check_preview):
                 page.restore_action.trigger()
             self.assertEqual(self.messages.count, 4)
             self.assertEqual(list(self.root.glob("*.before-restore-*.json")), [])
-            with patch.object(QMessageBox, "exec", return_value=QMessageBox.StandardButton.Yes):
+            with patch.object(RestoreBackupDialog, "exec", return_value=QDialog.DialogCode.Accepted):
                 page.restore_action.trigger()
         self.window.error.assert_not_called()
         self.assertEqual(self.messages.count, 3)
@@ -580,8 +590,8 @@ class CategoryUITests(unittest.TestCase):
         source.write_text("新增战术\nB1", encoding="utf-8")
         self.view(self.b)
         def confirm(dialog):
-            self.assertEqual(dialog.destination_label.text(), "目标类别：战术")
-            self.assertFalse(dialog.destination_label.isHidden())
+            self.assertEqual(dialog.destination.currentText(), "战术")
+            self.assertEqual(dialog.destination.currentData(), self.b)
             return QDialog.DialogCode.Accepted
         with patch("valorant_toxic_tamer.ui_management.QFileDialog.getOpenFileName", return_value=(str(source), "")), \
                 patch.object(ImportDialog, "exec", confirm):

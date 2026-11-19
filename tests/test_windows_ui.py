@@ -302,16 +302,17 @@ class WindowsTests(unittest.TestCase):
                 self.app.processEvents()
                 for text in ("30", "2.01", "0.19", "nan", "abc", ""):
                     with self.subTest(text=text):
-                        window.error.reset_mock()
                         window.settings.cooldown.setFocus()
                         window.settings.cooldown.selectAll()
                         QTest.keyClick(window.settings.cooldown, Qt.Key.Key_Backspace)
                         QTest.keyClicks(window.settings.cooldown, text)
                         QTest.mouseClick(window.settings.save_button, Qt.MouseButton.LeftButton)
-                        window.error.assert_called_once()
+                        self.assertTrue(window.settings.cooldown_error.isVisible())
+                        self.assertTrue(window.settings.cooldown.hasFocus())
                         self.assertEqual(config.path.read_bytes(), before)
                         self.assertEqual(sender.cooldown, DEFAULT_CONFIG["cooldown"])
                 controller.hotkeys.configure.assert_not_called()
+                window.error.assert_not_called()
             finally:
                 window.timer.stop()
                 window.hide()

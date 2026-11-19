@@ -426,6 +426,35 @@ class DesignUITests(unittest.TestCase):
         self.assertEqual(self.window.settings.font_size.currentData(), 13)
         self.assertEqual(self.window.management.list_widget.font().pixelSize(), 13)
 
+    def test_validation_focuses_field_and_keeps_error_visible_at_largest_font(self):
+        self.config.save({**self.config.value, "font_size": 16})
+        self.window.apply_font_size()
+        self.window.resize(840, 638)
+        self.window.tabs.setCurrentIndex(1)
+        settings = self.window.settings
+        self.app.processEvents()
+        scroll = settings.form_scroll
+        scroll.verticalScrollBar().setValue(scroll.verticalScrollBar().maximum())
+        before = self.config.path.read_bytes()
+        settings.cooldown.setText("nan")
+        settings.save_button.click()
+        self.app.processEvents()
+        self.assertTrue(settings.cooldown.hasFocus())
+        self.assertTrue(settings.cooldown_error.isVisible())
+        error_pos = settings.cooldown_error.mapTo(scroll.viewport(), QPoint())
+        self.assertTrue(scroll.viewport().rect().contains(error_pos))
+        self.assertEqual(settings.cooldown.accessibleDescription(), settings.cooldown_error.text())
+        self.assertEqual(self.config.path.read_bytes(), before)
+
+        settings.cooldown.setText("0.8")
+        self.assertTrue(settings.cooldown_error.isHidden())
+        settings.all_key.setCurrentText(settings.team_key.currentText())
+        settings.save_button.click()
+        self.assertTrue(settings.all_key.hasFocus())
+        self.assertTrue(settings.hotkey_error.isVisible())
+        self.assertEqual(self.config.path.read_bytes(), before)
+        self.window.error.assert_not_called()
+
     def test_largest_font_keeps_controls_readable_at_minimum_window_size(self):
         self.window.resize(840, 638)
         self.window.settings.font_size.setCurrentIndex(self.window.settings.font_size.findData(16))
