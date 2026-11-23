@@ -30,8 +30,12 @@ class Sender:
                 return False
             if channel not in ("team", "all"):
                 return False
-            if not self.messages.current:
-                self.notify("当前发送范围没有消息，请勾选类别或添加消息。")
+            message = self.messages.current
+            if not message:
+                if self.messages.wheel_categories:
+                    self.notify("已忽略：轮盘选中的类别已清空或删除，请重新选择或恢复循环。")
+                else:
+                    self.notify("当前发送范围没有消息，请勾选类别或添加消息。")
                 return False
             target = self.api.target()
             if not target:
@@ -44,7 +48,7 @@ class Sender:
             self.busy = True
             logger.info("input starting channel=%s hwnd=%s pid=%s", channel, *target)
             self.thread = threading.Thread(target=self._run,
-                args=(channel, target, self.messages.current), name="message-sender")
+                args=(channel, target, message), name="message-sender")
             try:
                 self.thread.start()
             except Exception:
@@ -64,6 +68,9 @@ class Sender:
             if self.busy:
                 raise ValueError("正在输入，请稍后再修改消息或设置。")
             return action()
+
+    def select_wheel_categories(self, categories):
+        self.edit(lambda: self.messages.select_wheel_categories(categories))
 
     def _run(self, channel, target, message):
         held = set()

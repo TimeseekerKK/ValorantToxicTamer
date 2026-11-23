@@ -18,7 +18,8 @@ def check(path):
         raise RuntimeError("打包缺少窗口和系统托盘所需的 app.ico。")
     modules = archive.open_embedded_archive("PYZ.pyz").toc
     ui_modules = {f"valorant_toxic_tamer.{name}" for name in
-                  ("ui", "ui_management", "ui_settings", "ui_categories", "ui_import", "ui_widgets")}
+                  ("ui", "ui_management", "ui_settings", "ui_categories", "ui_import", "ui_widgets",
+                   "category_wheel", "wheel_settings")}
     if not ui_modules.issubset(modules):
         raise RuntimeError("打包缺少界面页面、对话框或列表绘制模块。")
     if "valorant_toxic_tamer.elevation" not in modules:

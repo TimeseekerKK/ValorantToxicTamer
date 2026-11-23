@@ -147,6 +147,8 @@ class MessageManager:
         self.mode = "sequential"
         self._positions = {}
         self._active_category = None
+        self._wheel_categories = ()
+        self._wheel_index = 0
         self._keys = list(range(len(value["messages"])))
         self._next_key = len(self._keys)
         self.revision = 0
@@ -208,6 +210,20 @@ class MessageManager:
     def selected_categories(self):
         return self._library["selected_categories"].copy()
 
+    @property
+    def wheel_categories(self):
+        return self._wheel_categories
+
+    def select_wheel_categories(self, categories):
+        """Apply a session-only single or alternating selection. Empty restores the saved cycle."""
+        categories = tuple(categories)
+        if (any(not isinstance(cid, str) or cid == ALL_CATEGORY or not self._rows.get(cid)
+                for cid in categories)
+                or len(categories) != len(set(categories))):
+            raise ValueError("轮盘只能选择有效且有消息的类别，每个类别只能选择一次。")
+        self._wheel_categories = categories
+        self._wheel_index = 0
+
     def category_name(self, cid):
         if cid == ALL_CATEGORY:
             return "全部消息"
@@ -223,6 +239,10 @@ class MessageManager:
 
     @property
     def current_category(self):
+        if self._wheel_categories:
+            if any(not self._rows.get(cid) for cid in self._wheel_categories):
+                return None
+            return self._wheel_categories[self._wheel_index]
         candidates = [cid for cid in self._library["selected_categories"] if self._rows[cid]]
         return (self._active_category if self._active_category in candidates
                 else candidates[0] if candidates else None)
@@ -263,6 +283,9 @@ class MessageManager:
         if cid is None:
             return
         self._positions[cid] = (self._positions[cid] + 1) % len(self._rows[cid])
+        if self._wheel_categories:
+            self._wheel_index = (self._wheel_index + 1) % len(self._wheel_categories)
+            return
         candidates = [c for c in self.selected_categories if self._rows[c]]
         if self.mode == "alternating" or self._positions[cid] == 0:
             self._active_category = candidates[(candidates.index(cid) + 1) % len(candidates)]

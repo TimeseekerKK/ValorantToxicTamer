@@ -1,8 +1,9 @@
 """Lazily constructed settings page and its validation/save workflow."""
-from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtCore import QSignalBlocker, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import (QApplication, QFormLayout, QHBoxLayout, QLabel, QProgressBar,
-                               QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QDialog, QFormLayout, QHBoxLayout, QLabel,
+                               QListWidget, QListWidgetItem, QProgressBar, QScrollArea,
+                               QSizePolicy, QVBoxLayout, QWidget)
 
 from .app_version import VERSION
 from .config_manager import DEFAULT_CONFIG, FONT_SIZES, HOTKEYS
@@ -11,6 +12,7 @@ from .update_settings import RELEASES_PAGE, UPDATE_CHANNELS
 from .ui_theme import (CutButton, CutComboBox, CutLineEdit, Panel,
                        TacticalCheckBox, UpdateButton)
 from .ui_widgets import action_button, label, separator
+from .wheel_settings import WHEEL_LIMIT
 
 
 class SettingsPage(QWidget):
@@ -67,6 +69,10 @@ class SettingsPage(QWidget):
         for mode, title in CATEGORY_MODES.items():
             self.category_mode.addItem(title, mode)
         form.addRow("多类别发送方式", self.category_mode)
+        if host.wheel_settings is not None:
+            self.wheel_button = action_button(self, "", self.open_wheel_settings)
+            self.update_wheel_button()
+            form.addRow("类别轮盘", self.wheel_button)
         controls.addLayout(form)
         controls.addWidget(label("冷却 0.2–2 秒，两个频道共用；快捷键须不同。", "muted", True))
         self.category_mode.setToolTip("逐类：发完当前类别再换下一类。交替：每发一条换下一类。空类别自动跳过。")
@@ -177,6 +183,22 @@ class SettingsPage(QWidget):
         self.start_hidden.toggled.connect(self.settings_changed)
         self.autostart.toggled.connect(self.settings_changed)
 
+    def update_wheel_button(self):
+        value = self.host.wheel_settings
+        state = "有错误" if value.error else "已启用" if value.enabled else "已关闭"
+        self.wheel_button.setText(f"配置轮盘… · {state}")
+
+    def open_wheel_settings(self):
+        if not self.host.management.can_edit():
+            return
+        dialog = WheelSettingsDialog(self.host)
+        try:
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self.update_wheel_button()
+                self.host.refresh_status()
+        finally:
+            dialog.deleteLater()
+
     def load_settings(self):
         value = self.host.config.value
         self.team_key.setCurrentText(value["team_hotkey"])
@@ -265,3 +287,80 @@ class SettingsPage(QWidget):
             self.error_label.setText(f"未保存：{exc}")
             self.error_label.show()
             self.host.error(exc)
+
+
+class WheelSettingsDialog(QDialog):
+    def __init__(self, host):
+        super().__init__(host)
+        self.host = host
+        self.setWindowTitle("类别轮盘")
+        self.setMinimumWidth(440)
+        layout = QVBoxLayout(self)
+        settings = host.wheel_settings
+        self.enabled = TacticalCheckBox("启用类别轮盘")
+        self.enabled.setChecked(settings.enabled)
+        layout.addWidget(self.enabled)
+        layout.addWidget(label("游戏前台按住左 Alt 2 秒打开。移动鼠标选类，左键加入、右键移除，松开 Alt 确认。", "muted", True))
+        layout.addWidget(label("游戏仍会接收鼠标操作，可能转动准星或触发开火。", "muted", True))
+        layout.addWidget(label(
+            f"按勾选顺序排列，最多 {WHEEL_LIMIT} 类。取消后重新勾选可移到末尾。", "muted", True))
+        self.options = QListWidget()
+        self.options.setAccessibleName("轮盘预设类别")
+        self.options.setUniformItemSizes(True)
+        self.options.setMinimumHeight(156)
+        self.entries = {category["id"]: category["name"] for category in host.messages.categories}
+        self.order = [cid for cid in settings.categories if cid in self.entries]
+        for cid in self.entries:
+            item = QListWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, cid)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked if cid in self.order else Qt.CheckState.Unchecked)
+            self.options.addItem(item)
+        self.render_order()
+        self.options.itemChanged.connect(self.selection_changed)
+        layout.addWidget(self.options)
+        self.error = label(settings.error or "", "error", True)
+        self.error.setVisible(bool(settings.error))
+        layout.addWidget(self.error)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        buttons.addWidget(action_button(self, "取消", self.reject))
+        buttons.addWidget(action_button(self, "保存轮盘", self.save, primary=True))
+        layout.addLayout(buttons)
+
+    def render_order(self):
+        indices = {cid: index for index, cid in enumerate(self.order, 1)}
+        with QSignalBlocker(self.options):
+            for row in range(self.options.count()):
+                item = self.options.item(row)
+                cid = item.data(Qt.ItemDataRole.UserRole)
+                name = self.entries[cid]
+                title = f"{indices[cid]}. {name}" if cid in indices else name
+                if not self.host.messages.category_count(cid):
+                    title += "（无消息）"
+                item.setText(title)
+
+    def selection_changed(self, item):
+        cid = item.data(Qt.ItemDataRole.UserRole)
+        checked = item.checkState() == Qt.CheckState.Checked
+        self.error.hide()
+        if checked and cid not in self.order:
+            if len(self.order) >= WHEEL_LIMIT:
+                with QSignalBlocker(self.options):
+                    item.setCheckState(Qt.CheckState.Unchecked)
+                self.error.setText(f"轮盘最多选择 {WHEEL_LIMIT} 个类别。")
+                self.error.show()
+                return
+            self.order.append(cid)
+        elif not checked and cid in self.order:
+            self.order.remove(cid)
+        self.render_order()
+
+    def save(self):
+        try:
+            self.host.save_wheel_settings(self.enabled.isChecked(), tuple(self.order))
+        except (OSError, ValueError) as exc:
+            self.error.setText(str(exc))
+            self.error.show()
+        else:
+            self.accept()

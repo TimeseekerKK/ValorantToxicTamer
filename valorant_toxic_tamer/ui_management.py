@@ -80,7 +80,8 @@ class ManagementPage(QWidget):
         category_layout.setContentsMargins(14, 12, 14, 12)
         category_layout.setSpacing(6)
         scope_header = QHBoxLayout()
-        scope_header.addWidget(label("发送范围", "section"))
+        self.send_scope_title = label("发送范围", "section")
+        scope_header.addWidget(self.send_scope_title)
         scope_header.addStretch()
         self.send_scope_label = label("", "muted")
         scope_header.addWidget(self.send_scope_label)
@@ -99,11 +100,14 @@ class ManagementPage(QWidget):
         self.send_categories.itemChanged.connect(self.send_category_changed)
         category_layout.addWidget(self.send_categories)
         mode_row = QHBoxLayout()
-        mode_row.addWidget(label("发送方式"))
-        self.send_mode = label(CATEGORY_MODES[self.host.messages.mode], "muted")
-        self.send_mode.setToolTip("在设置页修改多类别发送方式，保存后生效。")
+        self.send_mode_caption = label("发送方式")
+        mode_row.addWidget(self.send_mode_caption)
+        self.send_mode = ElidingLabel("muted")
         mode_row.addWidget(self.send_mode, 1)
         category_layout.addLayout(mode_row)
+        self.restore_cycle_button = self.button("恢复循环", self.restore_cycle)
+        self.restore_cycle_button.hide()
+        category_layout.addWidget(self.restore_cycle_button, alignment=Qt.AlignmentFlag.AlignRight)
         sidebar = QWidget()
         sidebar.setMinimumWidth(240)
         sidebar.setMaximumWidth(300)
@@ -335,7 +339,27 @@ class ManagementPage(QWidget):
         self.send_scope_label.setText(summary)
         self.send_scope_label.setToolTip(order)
         self.send_scope_label.setAccessibleDescription(order)
-        self.send_mode.setText(CATEGORY_MODES[self.host.messages.mode])
+        wheel = self.host.messages.wheel_categories
+        if wheel:
+            names_by_id = {category["id"]: category["name"] for category in self.host.messages.categories}
+            labels = " → ".join(names_by_id.get(cid, "已删除类别") for cid in wheel)
+            mode = "锁定" if len(wheel) == 1 else "交替"
+            self.send_mode.set_full_text(f"{mode} · {labels}")
+        else:
+            self.send_mode.set_full_text(CATEGORY_MODES[self.host.messages.mode])
+        self.send_scope_title.setText("原发送范围" if wheel else "发送范围")
+        self.send_mode_caption.setVisible(not wheel)
+        self.restore_cycle_button.setVisible(bool(wheel))
+
+    def restore_cycle(self):
+        if not self.can_edit():
+            return
+        try:
+            self.host.sender.select_wheel_categories(())
+        except ValueError as exc:
+            self.host.error(exc)
+        else:
+            self.host.report("已恢复原发送范围和循环方式。")
 
     def send_category_changed(self, item):
         rendered = self._render_revision == self.host.messages.revision
@@ -406,6 +430,7 @@ class ManagementPage(QWidget):
         self.export_action.setEnabled(idle and bool(category_count))
         self.more_button.setEnabled(idle)
         self.pause_button.setEnabled(idle)
+        self.restore_cycle_button.setEnabled(idle)
         importing = self.import_worker is not None and self.import_worker.isRunning()
         self.cancel_import_button.setVisible(importing)
         self.cancel_import_button.setEnabled(importing and not self.import_worker.cancel.is_set())

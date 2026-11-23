@@ -11,6 +11,7 @@ from .message_manager import MessageManager
 from .sender import Sender
 from .tray import Tray
 from .win32_api import WindowsAPI
+from .wheel_settings import WheelSettings
 from .app_version import VERSION
 
 
@@ -32,6 +33,8 @@ class Application(QObject):
                              self.notifications.message.emit)
         self.window = None
         self.quitting = False
+        self.wheel_settings = WheelSettings(directory / "category-wheel.json")
+        self.wheel = None
         self.quit_timer = QTimer(self)
         self.quit_timer.setInterval(25)
         self.quit_timer.timeout.connect(self._finish_quit)
@@ -39,6 +42,12 @@ class Application(QObject):
         # Keep the native hotkey handle alive independently of the optional UI.
         self.hotkey_window = QWidget()
         self.hotkeys = Hotkeys(app, int(self.hotkey_window.winId()), self.api, self.trigger)
+        if self.wheel_settings.enabled:
+            try:
+                self.wheel = self._create_wheel()
+            except OSError as exc:
+                self.wheel_settings.error = f"类别轮盘未启动：{exc}"
+                logging.getLogger("ValorantToxicTamer").warning("%s", self.wheel_settings.error)
         self.tray = Tray(self.reveal, self.quit, self, font_size=self.config.value["font_size"])
         self.notifications.message.connect(self.report)
         app.aboutToQuit.connect(self.cleanup)
@@ -67,7 +76,8 @@ class Application(QObject):
             return
         if self.window is None:
             from .ui import MainWindow
-            self.window = MainWindow(self.messages, self.config, self.sender, self.save_settings)
+            self.window = MainWindow(self.messages, self.config, self.sender, self.save_settings,
+                                     wheel_settings=self.wheel_settings, save_wheel_settings=self.save_wheel_settings)
             self.window.updater.ready_to_install.connect(self.quit)
         self.window.set_hotkey_status(self.hotkeys.status)
         self.window.reveal(page)
@@ -75,12 +85,56 @@ class Application(QObject):
             self.window.report(self.last_message)
 
     def trigger(self, channel):
-        if self.quitting:
+        if self.quitting or (self.wheel is not None and self.wheel.visible):
             return False
         triggered = self.sender.trigger(channel)
         if self.window is not None and self.window.isVisible():
             self.window.refresh_status()
         return triggered
+
+    def _wheel_can_open(self):
+        with self.sender.lock:
+            return (not self.quitting and not self.sender.busy
+                    and not self.sender.cancel.is_set() and QApplication.activeModalWidget() is None
+                    and (self.window is None or self.window.management.import_worker is None))
+
+    def _create_wheel(self):
+        from .category_wheel import CategoryWheel
+        return CategoryWheel(self.app, int(self.hotkey_window.winId()), self.api, self.sender,
+                             self.wheel_settings, self._wheel_can_open, self._select_wheel_categories, self.report)
+
+    def _select_wheel_categories(self, categories):
+        try:
+            self.sender.select_wheel_categories(categories)
+        except ValueError as exc:
+            self.report(f"已忽略：{exc}")
+        else:
+            if self.window is not None and self.window.isVisible():
+                self.window.refresh_status()
+
+    def _close_wheel(self):
+        if self.wheel is not None:
+            self.wheel.close()
+            self.wheel = None
+
+    def save_wheel_settings(self, enabled, categories):
+        def save():
+            known = {category["id"] for category in self.messages.categories}
+            if any(cid not in known for cid in categories):
+                raise ValueError("有预设类别已删除，请重新选择。")
+            replacement = self._create_wheel() if enabled and self.wheel is None else None
+            try:
+                self.wheel_settings.save(enabled, categories)
+            except (OSError, ValueError):
+                if replacement is not None:
+                    replacement.close()
+                raise
+            if replacement is not None:
+                self.wheel = replacement
+            if not enabled:
+                self._close_wheel()
+                self.messages.select_wheel_categories(())
+        self.sender.edit(save)
 
     def save_settings(self, value):
         validate_config(value)
@@ -120,6 +174,7 @@ class Application(QObject):
 
     def cleanup(self):
         self.quit_timer.stop()
+        self._close_wheel()
         self.hotkeys.close()
         self.sender.stop()
         if self.window is not None:
@@ -135,6 +190,7 @@ class Application(QObject):
         if self.quitting:
             return
         self.quitting = True
+        self._close_wheel()
         self.sender.cancel.set()
         if self.window is not None:
             self.window.begin_shutdown()

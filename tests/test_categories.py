@@ -66,6 +66,76 @@ class CategoryTests(unittest.TestCase):
         self.messages.select_categories([self.a, self.b])
         self.assertEqual(self.take(3), ["A3", "B2", "A1"])
 
+    def test_wheel_wraps_and_restores_saved_cycle_at_its_previous_category(self):
+        self.messages.select_categories([self.a, self.b])
+        self.assertEqual(self.take(3), ["A1", "A2", "A3"])
+        before = self.messages.path.read_bytes()
+        self.messages.select_wheel_categories([self.a])
+        self.assertEqual(self.take(4), ["A1", "A2", "A3", "A1"])
+        self.messages.select_wheel_categories([self.b, self.a])
+        self.assertEqual(self.take(4), ["B1", "A2", "B2", "A3"])
+        self.take(1)
+        self.messages.select_wheel_categories([self.b, self.a])
+        self.assertEqual(self.messages.current, "B2")
+        self.messages.select_wheel_categories([])
+        self.assertEqual(self.messages.current, "B2")
+        self.assertEqual(self.messages.path.read_bytes(), before)
+        self.assertEqual(MessageManager(self.messages.path).current, "A1")
+
+    def test_wheel_pauses_if_any_selected_category_is_empty_or_deleted(self):
+        self.messages.select_wheel_categories([self.a, self.b])
+        self.messages.delete_messages(self.messages.rows_for(self.b))
+        self.assertEqual(self.messages.wheel_categories, (self.a, self.b))
+        api, reports = FakeAPI(), []
+        sender = Sender(self.messages, api, notify=reports.append)
+        self.assertFalse(sender.trigger("team"))
+        self.assertEqual(api.events, [])
+        self.assertIn("重新选择或恢复循环", reports[-1])
+        self.messages.advance()
+        self.messages.append(["B3"], self.b)
+        self.assertEqual(self.take(2), ["A1", "B3"])
+        self.messages.delete_category(self.b)
+        self.assertIsNone(self.messages.current)
+        self.messages.select_wheel_categories([])
+        self.assertIsNotNone(self.messages.current)
+
+    def test_invalid_wheel_selection_does_not_replace_the_active_order(self):
+        self.messages.select_wheel_categories([self.a, self.b])
+        self.take(1)
+        for selected in ([self.a, self.a], [self.empty], ["missing"], [ALL_CATEGORY], [[]]):
+            with self.subTest(selected=selected), self.assertRaises(ValueError):
+                self.messages.select_wheel_categories(selected)
+            self.assertEqual(self.messages.current, "B1")
+
+    def test_wheel_sender_advances_only_on_success_and_shares_channels(self):
+        api, reports = FakeAPI(), []
+        now = [10.0]
+        sender = Sender(self.messages, api, notify=reports.append,
+                        clock=lambda: now[0], wait=lambda _: None)
+        self.addCleanup(sender.stop)
+        sender.select_wheel_categories([self.b, self.a])
+        sender.busy = True
+        with self.assertRaises(ValueError):
+            sender.select_wheel_categories([self.a])
+        sender.busy = False
+        api.fail_text = True
+        self.assertTrue(sender.trigger("team"))
+        sender.thread.join(2)
+        self.assertFalse(sender.thread.is_alive())
+        self.assertIn("索引未推进", reports[-1])
+        self.assertEqual(self.messages.current, "B1")
+        self.assertFalse(sender.trigger("all"))
+        api.fail_text = False
+        for channel, expected, next_message in (
+                ("all", "B1", "A1"), ("team", "A1", "B2"), ("all", "B2", "A2")):
+            now[0] += 1
+            api.events.clear()
+            self.assertTrue(sender.trigger(channel))
+            sender.thread.join(2)
+            self.assertFalse(sender.thread.is_alive())
+            self.assertEqual("".join(value for value in api.events if isinstance(value, str)), expected)
+            self.assertEqual(self.messages.current, next_message)
+
     def test_all_progress_is_independent_in_both_directions(self):
         self.take(1)
         self.messages.select_categories([self.a])

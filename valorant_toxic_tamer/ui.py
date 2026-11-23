@@ -13,11 +13,13 @@ from .ui_widgets import label, separator
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, messages, config, sender, save_settings):
+    def __init__(self, messages, config, sender, save_settings, *, wheel_settings=None, save_wheel_settings=None):
         super().__init__()
         self.messages, self.config, self.sender = messages, config, sender
         self.messages.set_mode(config.value["category_mode"])
         self.save_settings = save_settings
+        self.wheel_settings = wheel_settings
+        self.save_wheel_settings = save_wheel_settings
         self.settings_loaded = False
         self.settings = None
         self.closing = False
@@ -121,7 +123,8 @@ class MainWindow(QMainWindow):
             busy = self.sender.busy
             paused = self.sender.paused
             state = ("已暂停" if paused else "正在输入" if busy else f"冷却 {remaining:.1f}s" if remaining
-                     else "就绪" if count else "当前发送范围为空")
+                     else "就绪" if count else "轮盘类别已清空或删除" if self.messages.wheel_categories
+                     else "当前发送范围为空")
             current = current or "暂无消息"
         position = index + 1 if count else 0
         category = self.messages.category_name(cid) if cid else "发送进度"
