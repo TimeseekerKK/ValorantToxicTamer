@@ -8,10 +8,10 @@
       "digest": "sha256:fed8daa17890c7238a7061f2862a4cf9963da9217f501aee06ee7ecd4fb7438c"
     },
     "beta": {
-      "version": "v1.10.0-beta.2",
-      "url": "https://github.com/TimeseekerKK/ValorantToxicTamer/releases/download/v1.10.0-beta.2/ValorantToxicTamer-Setup-v1.10.0-beta.2.exe",
-      "size": 49397505,
-      "digest": "sha256:ceb71e463213c2c4ac7b92d4ce5ec7aa6c5c14fc386371d67f4942526dfa7687"
+      "version": "v2.0.0-beta.1",
+      "url": "https://github.com/TimeseekerKK/ValorantToxicTamer/releases/download/v2.0.0-beta.1/ValorantToxicTamer-Setup-v2.0.0-beta.1.exe",
+      "size": 49418934,
+      "digest": "sha256:3b3e3569eab5b6d0ecd1c74cc95ea57112351dbe856676969a1bad1bbb72d30c"
     }
   }
 }
