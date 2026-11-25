@@ -2,10 +2,10 @@
   "schema": 1,
   "channels": {
     "stable": {
-      "version": "v2.0.0",
-      "url": "https://github.com/TimeseekerKK/ValorantToxicTamer/releases/download/v2.0.0/ValorantToxicTamer-Setup-v2.0.0.exe",
-      "size": 49421584,
-      "digest": "sha256:aac8a275ea4ee46d0f314b499b0eec2d8406680608a8127092a3dc729a068a62"
+      "version": "v2.0.1",
+      "url": "https://github.com/TimeseekerKK/ValorantToxicTamer/releases/download/v2.0.1/ValorantToxicTamer-Setup-v2.0.1.exe",
+      "size": 49418954,
+      "digest": "sha256:f75cde86e1aa51134c8ce6dcfb0a3c605c7acaa356c12fbb86a4e6d36242a868"
     },
     "beta": {
       "version": "v2.0.0-beta.1",
