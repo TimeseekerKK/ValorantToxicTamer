@@ -81,9 +81,18 @@ class WheelIntegrationTests(unittest.TestCase):
         ctl.save_wheel_settings(True, (self.attack, self.callout, self.cheer))
         wheel = ctl.wheel
         wheel.center_on_target = lambda: True
-        wheel.key(0x12, 0, 56)
-        wheel.pressed_at -= 2.1
-        wheel.poll()
+        with patch("valorant_toxic_tamer.category_wheel.time.monotonic", return_value=10.0) as clock:
+            wheel.key(0x12, 0, 56)
+            clock.return_value = 10.99
+            wheel.poll()
+            self.assertFalse(wheel.visible)
+            wheel.key(0x12, 1, 56)
+            clock.return_value = 11.0
+            wheel.poll()
+            self.assertFalse(wheel.visible)
+            wheel.key(0x12, 0, 56)
+            clock.return_value = 12.0
+            wheel.poll()
         self.assertTrue(wheel.visible)
         self.assertFalse(ctl.trigger("team"))
         wheel.mouse(0, -60, MOUSE_LEFT_DOWN)
