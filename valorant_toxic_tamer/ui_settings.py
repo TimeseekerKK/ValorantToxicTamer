@@ -300,7 +300,7 @@ class WheelSettingsDialog(QDialog):
         self.enabled = TacticalCheckBox("启用类别轮盘")
         self.enabled.setChecked(settings.enabled)
         layout.addWidget(self.enabled)
-        layout.addWidget(label("游戏前台按住左 Alt 2 秒打开。移动鼠标选类，左键加入、右键移除，松开 Alt 确认。", "muted", True))
+        layout.addWidget(label("游戏前台按住左 Alt 1 秒打开。移动鼠标选类，左键加入、右键移除，松开 Alt 确认。", "muted", True))
         layout.addWidget(label("游戏仍会接收鼠标操作，可能转动准星或触发开火。", "muted", True))
         layout.addWidget(label(
             f"按勾选顺序排列，最多 {WHEEL_LIMIT} 类。取消后重新勾选可移到末尾。", "muted", True))

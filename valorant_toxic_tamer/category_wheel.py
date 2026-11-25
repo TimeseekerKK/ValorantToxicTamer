@@ -286,7 +286,7 @@ class CategoryWheel:
     def poll(self):
         if self.target is None or not self.can_open() or not self.api.is_foreground(self.target):
             self.finish()
-        elif not self.visible and time.monotonic() - self.pressed_at >= 2:
+        elif not self.visible and time.monotonic() - self.pressed_at >= 1:
             self.show()
 
     def show(self):
